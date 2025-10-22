@@ -4,14 +4,22 @@ members = [
     "event-sourcing-macros",
 ]
 
+[workspace.package]
+license = "MIT"
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.88.0"
+
 [workspace.lints.clippy]
 pedantic = "warn"
 nursery = "warn"
 
 [package]
 name = "event-sourcing"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
