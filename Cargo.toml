@@ -28,7 +28,7 @@ workspace = true
 event-sourcing-macros = { path = "event-sourcing-macros" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "1"
+thiserror = "2"
 
 [dev-dependencies]
 anyhow = "1"
