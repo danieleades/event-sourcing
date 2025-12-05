@@ -66,7 +66,7 @@ the aggregate derive and the in-memory store.
 
 ```rust,no_run
 use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, EventMetadata, Handle, InMemoryEventStore, JsonCodec,
+    Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec,
     Projection, Repository,
 };
 use serde::{Deserialize, Serialize};
@@ -123,22 +123,22 @@ pub struct AccountBalance {
 }
 
 impl Projection for AccountBalance {
-    type Metadata = EventMetadata;
+    type Metadata = ();
 }
 
-impl ApplyProjection<FundsDeposited, EventMetadata> for AccountBalance {
+impl ApplyProjection<FundsDeposited, ()> for AccountBalance {
     fn apply_projection(
         &mut self,
         _aggregate_id: &str,
         event: &FundsDeposited,
-        _metadata: &EventMetadata,
+        _metadata: &(),
     ) {
         self.total_cents += event.amount_cents;
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<JsonCodec, EventMetadata> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let account_id = "ACC-001".to_string();
@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     repository.execute_command::<Account, DepositFunds>(
         &account_id,
         &command,
-        &EventMetadata::default(),
+        &(),
     )?;
 
     let summary = repository
