@@ -46,6 +46,9 @@ pub struct EventFilter {
     pub event_kind: String,
     pub aggregate_kind: Option<String>,
     pub aggregate_id: Option<String>,
+    /// Only load events with position strictly greater than this value.
+    /// Used for snapshot-based loading to skip already-applied events.
+    pub after_position: Option<u64>,
 }
 
 impl EventFilter {
@@ -56,6 +59,7 @@ impl EventFilter {
             event_kind: kind.into(),
             aggregate_kind: None,
             aggregate_id: None,
+            after_position: None,
         }
     }
 
@@ -70,7 +74,19 @@ impl EventFilter {
             event_kind: event_kind.into(),
             aggregate_kind: Some(aggregate_kind.into()),
             aggregate_id: Some(aggregate_id.into()),
+            after_position: None,
         }
+    }
+
+    /// Only load events with position strictly greater than the given value.
+    ///
+    /// This is used for snapshot-based loading: load a snapshot at position N,
+    /// then load events with `after(N)` to get only the events that occurred
+    /// after the snapshot was taken.
+    #[must_use]
+    pub const fn after(mut self, position: u64) -> Self {
+        self.after_position = Some(position);
+        self
     }
 }
 
@@ -289,6 +305,10 @@ where
         let mut result = Vec::new();
         let mut seen: HashSet<(String, String, String)> = HashSet::new(); // (aggregate_kind, aggregate_id, event_kind)
 
+        // Find the minimum after_position across all filters (if any have one set)
+        // Events must have position > after_position to be included
+        let min_after_position = filters.iter().filter_map(|f| f.after_position).min();
+
         // Group filters by aggregate ID, converting to HashSet for O(1) lookup
         let mut all_kinds: HashSet<String> = HashSet::new(); // Filters with no aggregate restriction
         let mut by_aggregate: HashMap<(String, String), HashSet<String>> = HashMap::new(); // Filters targeting a specific aggregate
@@ -304,11 +324,19 @@ where
             }
         }
 
+        // Helper to check position filter
+        let passes_position_filter = |event: &StoredEvent<u64, M>| -> bool {
+            min_after_position.is_none_or(|after| event.position > after)
+        };
+
         // Load events for specific aggregates
         for ((aggregate_kind, aggregate_id), kinds) in &by_aggregate {
             let stream_key = format!("{aggregate_kind}::{aggregate_id}");
             if let Some(stream) = self.streams.get(&stream_key) {
-                for event in stream.iter().filter(|e| kinds.contains(&e.kind)) {
+                for event in stream
+                    .iter()
+                    .filter(|e| kinds.contains(&e.kind) && passes_position_filter(e))
+                {
                     // Track that we've seen this (aggregate_kind, aggregate_id, kind) triple
                     seen.insert((
                         event.aggregate_kind.clone(),
@@ -324,7 +352,10 @@ where
         // Skip events we've already loaded for specific aggregates
         if !all_kinds.is_empty() {
             for stream in self.streams.values() {
-                for event in stream.iter().filter(|e| all_kinds.contains(&e.kind)) {
+                for event in stream
+                    .iter()
+                    .filter(|e| all_kinds.contains(&e.kind) && passes_position_filter(e))
+                {
                     let key = (
                         event.aggregate_kind.clone(),
                         event.aggregate_id.clone(),

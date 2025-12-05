@@ -91,7 +91,7 @@ mod with_test_util {
         }
     }
 
-    #[derive(Debug, Default, PartialEq, Eq)]
+    #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
     struct BankAccount {
         balance: u64,
         is_open: bool,

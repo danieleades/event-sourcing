@@ -40,7 +40,7 @@ pub struct EventMetadata {
 // Subscription Aggregate
 // =============================================================================
 
-#[derive(Debug, Default, Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(
     id = String,
     error = String,
@@ -52,7 +52,7 @@ pub struct Subscription {
     active_plan: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum SubscriptionStatus {
     Active,
     Cancelled,
@@ -165,7 +165,7 @@ impl fmt::Display for InvoiceId {
     }
 }
 
-#[derive(Debug, Default, Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(
     id = InvoiceId,
     error = String,

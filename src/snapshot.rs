@@ -1,0 +1,221 @@
+//! Snapshot support for optimized aggregate loading.
+//!
+//! Snapshots persist aggregate state at a point in time, reducing the number of
+//! events that need to be replayed when loading an aggregate. This module provides:
+//!
+//! - [`Snapshot`] - Point-in-time aggregate state
+//! - [`SnapshotStore`] - Trait for snapshot persistence with policy
+//! - [`NoSnapshots`] - No-op implementation for backwards compatibility
+//! - [`InMemorySnapshotStore`] - Reference implementation with configurable policy
+
+use std::collections::HashMap;
+use std::convert::Infallible;
+
+/// Point-in-time snapshot of aggregate state.
+///
+/// The `position` field indicates the event stream position when this snapshot
+/// was taken. When loading an aggregate, only events after this position need
+/// to be replayed.
+///
+/// Schema evolution is handled at the serialization layer (e.g., via `serde_evolve`),
+/// so no version field is needed here.
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    /// Event position when this snapshot was taken.
+    pub position: u64,
+    /// Serialized aggregate state.
+    pub data: Vec<u8>,
+}
+
+/// Trait for snapshot persistence with built-in policy.
+///
+/// Implementations decide both *how* to store snapshots and *when* to store them.
+/// The [`offer_snapshot`](SnapshotStore::offer_snapshot) method is called after
+/// every command execution, and the implementation decides whether to actually
+/// persist the snapshot based on its internal policy.
+///
+/// # Example Implementations
+///
+/// - Always save: useful for aggregates with expensive replay
+/// - Every N events: balance between storage and replay cost
+/// - Never save: read-only replicas that only load snapshots created elsewhere
+pub trait SnapshotStore {
+    /// Error type for snapshot operations.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Load the most recent snapshot for an aggregate.
+    ///
+    /// Returns `Ok(None)` if no snapshot exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying storage fails.
+    fn load(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &str,
+    ) -> Result<Option<Snapshot>, Self::Error>;
+
+    /// Offer a snapshot for storage.
+    ///
+    /// Called after every command execution. The implementation decides whether
+    /// to actually persist based on its policy (e.g., every N events).
+    ///
+    /// # Arguments
+    ///
+    /// * `aggregate_kind` - The aggregate type identifier
+    /// * `aggregate_id` - The aggregate instance identifier
+    /// * `snapshot` - The snapshot to potentially store
+    /// * `events_since_last_snapshot` - Number of events replayed since the last snapshot
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persistence fails.
+    fn offer_snapshot(
+        &mut self,
+        aggregate_kind: &str,
+        aggregate_id: &str,
+        snapshot: Snapshot,
+        events_since_last_snapshot: u64,
+    ) -> Result<(), Self::Error>;
+}
+
+/// No-op snapshot store for backwards compatibility.
+///
+/// This implementation:
+/// - Always returns `None` from `load()`
+/// - Silently discards all offered snapshots
+///
+/// Use this as the default when snapshots are not needed.
+#[derive(Clone, Debug, Default)]
+pub struct NoSnapshots;
+
+impl SnapshotStore for NoSnapshots {
+    type Error = Infallible;
+
+    fn load(
+        &self,
+        _aggregate_kind: &str,
+        _aggregate_id: &str,
+    ) -> Result<Option<Snapshot>, Self::Error> {
+        Ok(None)
+    }
+
+    fn offer_snapshot(
+        &mut self,
+        _aggregate_kind: &str,
+        _aggregate_id: &str,
+        _snapshot: Snapshot,
+        _events_since_last_snapshot: u64,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/// Snapshot creation policy.
+#[derive(Clone, Debug)]
+enum SnapshotPolicy {
+    /// Create a snapshot after every command.
+    Always,
+    /// Create a snapshot every N events.
+    EveryNEvents(u64),
+    /// Never create snapshots (load-only mode).
+    Never,
+}
+
+impl SnapshotPolicy {
+    const fn should_snapshot(&self, events_since: u64) -> bool {
+        match self {
+            Self::Always => true,
+            Self::EveryNEvents(threshold) => events_since >= *threshold,
+            Self::Never => false,
+        }
+    }
+}
+
+/// In-memory snapshot store with configurable policy.
+///
+/// This is a reference implementation suitable for testing and development.
+/// Production systems should implement [`SnapshotStore`] with durable storage.
+///
+/// # Example
+///
+/// ```ignore
+/// use event_sourcing::{Repository, InMemoryEventStore, InMemorySnapshotStore, JsonCodec};
+///
+/// let repo = Repository::new(InMemoryEventStore::new(JsonCodec))
+///     .with_snapshots(InMemorySnapshotStore::every(100));
+/// ```
+#[derive(Clone, Debug)]
+pub struct InMemorySnapshotStore {
+    snapshots: HashMap<String, Snapshot>,
+    policy: SnapshotPolicy,
+}
+
+impl InMemorySnapshotStore {
+    /// Create a snapshot store that saves after every command.
+    #[must_use]
+    pub fn always() -> Self {
+        Self {
+            snapshots: HashMap::new(),
+            policy: SnapshotPolicy::Always,
+        }
+    }
+
+    /// Create a snapshot store that saves every N events.
+    #[must_use]
+    pub fn every(n: u64) -> Self {
+        Self {
+            snapshots: HashMap::new(),
+            policy: SnapshotPolicy::EveryNEvents(n),
+        }
+    }
+
+    /// Create a snapshot store that never saves (load-only).
+    ///
+    /// Useful for read replicas that consume snapshots created elsewhere.
+    #[must_use]
+    pub fn never() -> Self {
+        Self {
+            snapshots: HashMap::new(),
+            policy: SnapshotPolicy::Never,
+        }
+    }
+
+    fn key(aggregate_kind: &str, aggregate_id: &str) -> String {
+        format!("{aggregate_kind}::{aggregate_id}")
+    }
+}
+
+impl Default for InMemorySnapshotStore {
+    fn default() -> Self {
+        Self::always()
+    }
+}
+
+impl SnapshotStore for InMemorySnapshotStore {
+    type Error = Infallible;
+
+    fn load(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &str,
+    ) -> Result<Option<Snapshot>, Self::Error> {
+        let key = Self::key(aggregate_kind, aggregate_id);
+        Ok(self.snapshots.get(&key).cloned())
+    }
+
+    fn offer_snapshot(
+        &mut self,
+        aggregate_kind: &str,
+        aggregate_id: &str,
+        snapshot: Snapshot,
+        events_since_last_snapshot: u64,
+    ) -> Result<(), Self::Error> {
+        if self.policy.should_snapshot(events_since_last_snapshot) {
+            let key = Self::key(aggregate_kind, aggregate_id);
+            self.snapshots.insert(key, snapshot);
+        }
+        Ok(())
+    }
+}

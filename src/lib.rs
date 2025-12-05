@@ -5,6 +5,7 @@ mod codec;
 mod event;
 mod projection;
 mod repository;
+mod snapshot;
 mod store;
 
 pub use aggregate::{Aggregate, AggregateBuilder, Apply, Handle};
@@ -12,6 +13,7 @@ pub use codec::{Codec, ProjectionEvent, SerializableEvent};
 pub use event::DomainEvent;
 pub use projection::{ApplyProjection, Projection, ProjectionBuilder, ProjectionError};
 pub use repository::{CommandError, Repository};
+pub use snapshot::{InMemorySnapshotStore, NoSnapshots, Snapshot, SnapshotStore};
 pub use store::{
     EventFilter, EventStore, InMemoryEventStore, JsonCodec, LoadEventsResult, PersistableEvent,
     StoredEvent, Transaction,
@@ -91,7 +93,7 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, Serialize, serde::Deserialize)]
     struct Counter {
         value: i32,
     }
@@ -674,7 +676,7 @@ mod tests {
 
         #[test]
         fn command_error_display_aggregate() {
-            let error: CommandError<String, io::Error, io::Error> =
+            let error: CommandError<String, io::Error, io::Error, io::Error> =
                 CommandError::Aggregate("invalid state".to_string());
 
             let msg = format!("{error}");
@@ -691,7 +693,7 @@ mod tests {
 
         #[test]
         fn command_error_aggregate_has_no_source() {
-            let error: CommandError<String, io::Error, io::Error> =
+            let error: CommandError<String, io::Error, io::Error, io::Error> =
                 CommandError::Aggregate("test".to_string());
 
             assert!(error.source().is_none());
@@ -700,7 +702,8 @@ mod tests {
         #[test]
         fn command_error_store_has_source() {
             let inner = io::Error::other("store error");
-            let error: CommandError<String, io::Error, io::Error> = CommandError::Store(inner);
+            let error: CommandError<String, io::Error, io::Error, io::Error> =
+                CommandError::Store(inner);
 
             assert!(error.source().is_some());
         }

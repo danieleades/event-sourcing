@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 // Aggregates and domain events
 // =============================================================================
 
-#[derive(Debug, Default, Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(id = String, error = String, events(ProductRestocked, InventoryAdjusted))]
 struct Product;
 
@@ -54,7 +54,7 @@ impl Apply<InventoryAdjusted> for Product {
     fn apply(&mut self, _event: &InventoryAdjusted) {}
 }
 
-#[derive(Debug, Default, Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(id = String, error = String, events(SaleCompleted))]
 struct Sale;
 
@@ -73,7 +73,7 @@ impl Apply<SaleCompleted> for Sale {
     fn apply(&mut self, _event: &SaleCompleted) {}
 }
 
-#[derive(Debug, Default, Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(id = String, error = String, events(PromotionApplied))]
 struct Promotion;
 

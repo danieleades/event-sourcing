@@ -275,7 +275,7 @@ mod tests {
         Subtracted(ValueSubtracted),
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
     struct Counter {
         value: i32,
     }

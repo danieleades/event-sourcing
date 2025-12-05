@@ -8,10 +8,13 @@ pub use event_sourcing_macros::Aggregate;
 
 use std::{fmt, marker::PhantomData};
 
+use serde::{Serialize, de::DeserializeOwned};
+
 use crate::{
     codec::{Codec, ProjectionEvent},
     projection::ProjectionError,
     repository::Repository,
+    snapshot::SnapshotStore,
     store::{EventFilter, EventStore},
 };
 
@@ -20,7 +23,10 @@ use crate::{
 /// Aggregates rebuild their state from events (`Apply<E>`) and validate commands via
 /// [`Handle<C>`]. The derive macro generates the event enum and plumbing automatically, while
 /// keeping your state struct focused on domain behaviour.
-pub trait Aggregate: Default + Sized {
+///
+/// Aggregates must be serializable to support snapshotting. Use `#[derive(Serialize, Deserialize)]`
+/// or implement the traits manually. Schema evolution can be handled using `serde_evolve::Versioned`.
+pub trait Aggregate: Default + Sized + Serialize + DeserializeOwned {
     /// Aggregate type identifier used by the event store.
     ///
     /// This is combined with the aggregate ID to create stream identifiers.
@@ -86,21 +92,23 @@ pub trait Handle<C>: Aggregate {
 }
 
 /// Builder for loading aggregates by ID.
-pub struct AggregateBuilder<'a, S, A>
+pub struct AggregateBuilder<'a, S, SS, A>
 where
     S: EventStore,
+    SS: SnapshotStore,
     A: Aggregate,
 {
-    pub(super) repository: &'a Repository<S>,
+    pub(super) repository: &'a Repository<S, SS>,
     pub(super) _phantom: PhantomData<A>,
 }
 
-impl<'a, S, A> AggregateBuilder<'a, S, A>
+impl<'a, S, SS, A> AggregateBuilder<'a, S, SS, A>
 where
     S: EventStore,
+    SS: SnapshotStore,
     A: Aggregate,
 {
-    pub(super) const fn new(repository: &'a Repository<S>) -> Self {
+    pub(super) const fn new(repository: &'a Repository<S, SS>) -> Self {
         Self {
             repository,
             _phantom: PhantomData,

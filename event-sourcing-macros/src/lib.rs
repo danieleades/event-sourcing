@@ -113,6 +113,7 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
         .collect();
 
     let expanded = quote! {
+        #[derive(Clone, ::serde::Serialize, ::serde::Deserialize)]
         #struct_vis enum #event_enum_name {
             #(#variant_names(#event_types)),*
         }

@@ -10,6 +10,7 @@ use crate::{
     codec::Codec,
     event::DomainEvent,
     repository::Repository,
+    snapshot::SnapshotStore,
     store::{EventFilter, EventStore, StoredEvent},
 };
 
@@ -92,22 +93,24 @@ struct RegisteredEvent<P, S: EventStore> {
 }
 
 /// Builder used to configure which events should be loaded for a projection.
-pub struct ProjectionBuilder<'a, S, P>
+pub struct ProjectionBuilder<'a, S, SS, P>
 where
     S: EventStore,
+    SS: SnapshotStore,
     P: Projection,
 {
-    pub(super) repository: &'a Repository<S>,
+    pub(super) repository: &'a Repository<S, SS>,
     registered: Vec<RegisteredEvent<P, S>>,
     pub(super) _phantom: PhantomData<P>,
 }
 
-impl<'a, S, P> ProjectionBuilder<'a, S, P>
+impl<'a, S, SS, P> ProjectionBuilder<'a, S, SS, P>
 where
     S: EventStore,
+    SS: SnapshotStore,
     P: Projection,
 {
-    pub(super) const fn new(repository: &'a Repository<S>) -> Self {
+    pub(super) const fn new(repository: &'a Repository<S, SS>) -> Self {
         Self {
             repository,
             registered: Vec::new(),
