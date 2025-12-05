@@ -92,12 +92,7 @@ pub struct DepositFunds {
 // === Aggregate ===
 
 #[derive(Debug, Default, event_sourcing::Aggregate)]
-#[aggregate(
-    id = String,
-    error = String,
-    events(FundsDeposited),
-    kind = "bank-account"
-)]
+#[aggregate(id = String, error = String, events(FundsDeposited))]
 pub struct Account {
     balance_cents: i64,
 }

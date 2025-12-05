@@ -1,9 +1,40 @@
+// This lint is triggered by darling's generated code for `#[darling(default)]`
+#![allow(clippy::option_if_let_else)]
+
+use darling::{FromDeriveInput, FromMeta, util::PathList};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    DeriveInput, Lit, Meta, Path, Token, Type, parse::Parse, parse_macro_input,
-    punctuated::Punctuated, token::Comma,
-};
+use syn::{DeriveInput, Ident, Path, parse_macro_input};
+
+/// Wrapper for `syn::Path` that parses from `key = Type` syntax.
+#[derive(Debug)]
+struct TypePath(Path);
+
+impl FromMeta for TypePath {
+    fn from_meta(item: &syn::Meta) -> darling::Result<Self> {
+        if let syn::Meta::NameValue(nv) = item
+            && let syn::Expr::Path(expr_path) = &nv.value
+        {
+            return Ok(Self(expr_path.path.clone()));
+        }
+        Err(darling::Error::unsupported_shape("expected `key = Type`"))
+    }
+}
+
+/// Configuration for the `#[aggregate(...)]` attribute.
+#[derive(Debug, FromDeriveInput)]
+#[darling(attributes(aggregate), supports(struct_any))]
+struct AggregateArgs {
+    ident: Ident,
+    vis: syn::Visibility,
+    id: TypePath,
+    error: TypePath,
+    events: PathList,
+    #[darling(default)]
+    kind: Option<String>,
+    #[darling(default)]
+    event_enum: Option<String>,
+}
 
 /// Derives the `Aggregate` trait for a struct.
 ///
@@ -32,206 +63,62 @@ use syn::{
 ///
 /// ```ignore
 /// #[derive(Aggregate)]
-/// #[aggregate(
-///     id = String,
-///     error = String,
-///     events(FundsDeposited, FundsWithdrawn),
-///     kind = "account"
-/// )]
+/// #[aggregate(id = String, error = String, events(FundsDeposited, FundsWithdrawn))]
 /// pub struct Account {
 ///     balance: i64,
 /// }
-///
-/// impl Apply<FundsDeposited> for Account {
-///     fn apply(&mut self, event: &FundsDeposited) {
-///         self.balance += event.amount;
-///     }
-/// }
-///
-/// impl Handle<DepositFunds> for Account {
-///     fn handle(&self, command: &DepositFunds) -> Result<Vec<Self::Event>, Self::Error> {
-///         if command.amount <= 0 {
-///             return Err("amount must be positive".to_string());
-///         }
-///         Ok(vec![FundsDeposited { amount: command.amount }.into()])
-///     }
-/// }
-///
-/// // Usage:
-/// let command = DepositFunds { amount: 100 };
-/// repository.execute_command::<Account, DepositFunds>(&account_id, &command, &metadata)?;
 /// ```
 #[proc_macro_derive(Aggregate, attributes(aggregate))]
 pub fn derive_aggregate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
-    let struct_name = &input.ident;
-    let struct_vis = &input.vis;
-
-    // Extract configuration from #[aggregate(...)] attribute
-    let mut id_type: Option<Type> = None;
-    let mut error_type: Option<Type> = None;
-    let mut event_types: Vec<Path> = Vec::new();
-    let mut command_types: Vec<Path> = Vec::new();
-    let mut kind: Option<String> = None;
-    let mut event_enum_name: Option<String> = None;
-    let mut command_enum_name: Option<String> = None;
-
-    for attr in &input.attrs {
-        if attr.path().is_ident("aggregate")
-            && let Meta::List(meta_list) = &attr.meta
-        {
-            let _ = meta_list.parse_nested_meta(|meta| {
-                if meta.path.is_ident("id") {
-                    let value = meta.value()?;
-                    let ty: Type = value.parse()?;
-                    id_type = Some(ty);
-                } else if meta.path.is_ident("error") {
-                    let value = meta.value()?;
-                    let ty: Type = value.parse()?;
-                    error_type = Some(ty);
-                } else if meta.path.is_ident("events") {
-                    // Parse events(Type1, Type2, ...)
-                    let content;
-                    syn::parenthesized!(content in meta.input);
-                    let paths: Punctuated<Path, Comma> =
-                        content.parse_terminated(Path::parse, Token![,])?;
-                    event_types.extend(paths);
-                } else if meta.path.is_ident("commands") {
-                    // Parse commands(Type1, Type2, ...)
-                    let content;
-                    syn::parenthesized!(content in meta.input);
-                    let paths: Punctuated<Path, Comma> =
-                        content.parse_terminated(Path::parse, Token![,])?;
-                    command_types.extend(paths);
-                } else if meta.path.is_ident("kind") {
-                    let value = meta.value()?;
-                    let lit: Lit = value.parse()?;
-                    if let Lit::Str(lit_str) = lit {
-                        kind = Some(lit_str.value());
-                    }
-                } else if meta.path.is_ident("event_enum") {
-                    let value = meta.value()?;
-                    let lit: Lit = value.parse()?;
-                    if let Lit::Str(lit_str) = lit {
-                        event_enum_name = Some(lit_str.value());
-                    }
-                } else if meta.path.is_ident("command_enum") {
-                    let value = meta.value()?;
-                    let lit: Lit = value.parse()?;
-                    if let Lit::Str(lit_str) = lit {
-                        command_enum_name = Some(lit_str.value());
-                    }
-                }
-                Ok(())
-            });
-        }
+    match AggregateArgs::from_derive_input(&input) {
+        Ok(args) => generate_aggregate_impl(args, &input),
+        Err(err) => err.write_errors().into(),
     }
+}
 
-    let Some(id_type) = id_type else {
-        return syn::Error::new_spanned(
-            &input,
-            "Aggregate derive requires #[aggregate(id = Type, ...)] attribute",
-        )
-        .to_compile_error()
-        .into();
-    };
-
-    let Some(error_type) = error_type else {
-        return syn::Error::new_spanned(
-            &input,
-            "Aggregate derive requires #[aggregate(error = Type, ...)] attribute",
-        )
-        .to_compile_error()
-        .into();
-    };
+fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStream {
+    let event_types: Vec<&Path> = args.events.iter().collect();
 
     if event_types.is_empty() {
-        return syn::Error::new_spanned(
-            &input,
-            "Aggregate derive requires #[aggregate(events(...), ...)] with at least one event type",
-        )
-        .to_compile_error()
-        .into();
+        return darling::Error::custom("events(...) must contain at least one event type")
+            .with_span(&input.ident)
+            .write_errors()
+            .into();
     }
 
-    // Commands are no longer required - they're handled via Handle<C> trait directly
-    // The commands attribute is now ignored if present
+    let struct_name = &args.ident;
+    let struct_vis = &args.vis;
+    let id_type = &args.id.0;
+    let error_type = &args.error.0;
 
-    // Default kind to lowercase struct name
-    let kind = kind.unwrap_or_else(|| struct_name.to_string().to_lowercase());
+    let kind = args
+        .kind
+        .unwrap_or_else(|| struct_name.to_string().to_lowercase());
 
-    // Default enum names
-    let event_enum_name = event_enum_name
-        .map(|name| syn::Ident::new(&name, struct_name.span()))
-        .unwrap_or_else(|| syn::Ident::new(&format!("{}Event", struct_name), struct_name.span()));
+    let event_enum_name = args.event_enum.map_or_else(
+        || Ident::new(&format!("{struct_name}Event"), struct_name.span()),
+        |name| Ident::new(&name, struct_name.span()),
+    );
 
-    // Generate event enum variants
-    let event_variants = event_types.iter().map(|event_type| {
-        let variant_name = event_type.segments.last().unwrap().ident.clone();
-        quote! {
-            #variant_name(#event_type)
-        }
-    });
+    let variant_names: Vec<_> = event_types
+        .iter()
+        .map(|p| {
+            &p.segments
+                .last()
+                .expect("event type path must have at least one segment")
+                .ident
+        })
+        .collect();
 
-    // Generate EVENT_KINDS array
-    let event_kinds = event_types.iter().map(|event_type| {
-        quote! { #event_type::KIND }
-    });
-
-    // Generate from_stored match arms for events
-    let event_from_stored_arms = event_types.iter().map(|event_type| {
-        let variant_name = event_type.segments.last().unwrap().ident.clone();
-        quote! {
-            #event_type::KIND => Ok(Self::#variant_name(codec.deserialize(data)?))
-        }
-    });
-
-    // Generate to_persistable match arms for events
-    let event_to_persistable_arms = event_types.iter().map(|event_type| {
-        let variant_name = event_type.segments.last().unwrap().ident.clone();
-        quote! {
-            Self::#variant_name(event) => (
-                #event_type::KIND.to_string(),
-                codec.serialize(&event)?
-            )
-        }
-    });
-
-    // Generate From<E> implementations for events
-    let event_from_impls = event_types.iter().map(|event_type| {
-        let variant_name = event_type.segments.last().unwrap().ident.clone();
-        quote! {
-            impl From<#event_type> for #event_enum_name {
-                fn from(event: #event_type) -> Self {
-                    Self::#variant_name(event)
-                }
-            }
-        }
-    });
-
-    // Generate apply match arms
-    let apply_arms = event_types.iter().map(|event_type| {
-        let variant_name = event_type.segments.last().unwrap().ident.clone();
-        quote! {
-            #event_enum_name::#variant_name(ref event) => {
-                ::event_sourcing::Apply::apply(self, event)
-            }
-        }
-    });
-
-    // Generate the complete output
     let expanded = quote! {
-        // Event enum definition
         #struct_vis enum #event_enum_name {
-            #(#event_variants),*
+            #(#variant_names(#event_types)),*
         }
 
-        // ProjectionEvent trait implementation
         impl ::event_sourcing::ProjectionEvent for #event_enum_name {
-            const EVENT_KINDS: &'static [&'static str] = &[
-                #(#event_kinds),*
-            ];
+            const EVENT_KINDS: &'static [&'static str] = &[#(#event_types::KIND),*];
 
             fn from_stored<C: ::event_sourcing::Codec>(
                 kind: &str,
@@ -239,13 +126,12 @@ pub fn derive_aggregate(input: TokenStream) -> TokenStream {
                 codec: &C,
             ) -> Result<Self, C::Error> {
                 match kind {
-                    #(#event_from_stored_arms,)*
+                    #(#event_types::KIND => Ok(Self::#variant_names(codec.deserialize(data)?)),)*
                     _ => panic!("Unknown event kind: {}", kind),
                 }
             }
         }
 
-        // SerializableEvent trait implementation
         impl ::event_sourcing::SerializableEvent for #event_enum_name {
             fn to_persistable<C: ::event_sourcing::Codec, M>(
                 self,
@@ -253,30 +139,29 @@ pub fn derive_aggregate(input: TokenStream) -> TokenStream {
                 metadata: M,
             ) -> Result<::event_sourcing::PersistableEvent<M>, C::Error> {
                 let (kind, data) = match self {
-                    #(#event_to_persistable_arms,)*
+                    #(Self::#variant_names(event) => (#event_types::KIND.to_string(), codec.serialize(&event)?)),*
                 };
-                Ok(::event_sourcing::PersistableEvent {
-                    kind,
-                    data,
-                    metadata,
-                })
+                Ok(::event_sourcing::PersistableEvent { kind, data, metadata })
             }
         }
 
-        // From<E> implementations for events
-        #(#event_from_impls)*
+        #(
+            impl From<#event_types> for #event_enum_name {
+                fn from(event: #event_types) -> Self {
+                    Self::#variant_names(event)
+                }
+            }
+        )*
 
-        // Aggregate trait implementation
         impl ::event_sourcing::Aggregate for #struct_name {
             const KIND: &'static str = #kind;
-
             type Event = #event_enum_name;
             type Error = #error_type;
             type Id = #id_type;
 
             fn apply(&mut self, event: Self::Event) {
                 match event {
-                    #(#apply_arms,)*
+                    #(#event_enum_name::#variant_names(ref e) => ::event_sourcing::Apply::apply(self, e)),*
                 }
             }
         }

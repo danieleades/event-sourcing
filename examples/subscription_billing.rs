@@ -18,11 +18,10 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::time::SystemTime;
 
 use event_sourcing::{
-    Aggregate, Apply, ApplyProjection, DomainEvent, EventMetadata, Handle, InMemoryEventStore,
-    JsonCodec, Projection, Repository,
+    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec,
+    Projection, Repository,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,25 +29,11 @@ use serde::{Deserialize, Serialize};
 // Shared domain types
 // =============================================================================
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CustomerId(String);
-
-impl CustomerId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for CustomerId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+#[allow(clippy::struct_field_names)]
+#[derive(Debug, Clone)]
+pub struct EventMetadata {
+    correlation_id: String,
+    user_id: String,
 }
 
 // =============================================================================
@@ -57,7 +42,7 @@ impl fmt::Display for CustomerId {
 
 #[derive(Debug, Default, Aggregate)]
 #[aggregate(
-    id = CustomerId,
+    id = String,
     error = String,
     events(SubscriptionStarted, SubscriptionCancelled),
     kind = "subscription"
@@ -67,17 +52,12 @@ pub struct Subscription {
     active_plan: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum SubscriptionStatus {
     Active,
     Cancelled,
+    #[default]
     Inactive,
-}
-
-impl Default for SubscriptionStatus {
-    fn default() -> Self {
-        Self::Inactive
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -166,12 +146,12 @@ impl Handle<CancelSubscription> for Subscription {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InvoiceId {
-    pub customer_id: CustomerId,
+    pub customer_id: String,
     pub invoice_number: String,
 }
 
 impl InvoiceId {
-    pub fn new(customer_id: CustomerId, invoice_number: impl Into<String>) -> Self {
+    pub fn new(customer_id: String, invoice_number: impl Into<String>) -> Self {
         Self {
             customer_id,
             invoice_number: invoice_number.into(),
@@ -195,7 +175,7 @@ impl fmt::Display for InvoiceId {
 pub struct Invoice {
     issued: bool,
     settled: bool,
-    customer_id: Option<CustomerId>,
+    customer_id: Option<String>,
     amount_cents: i64,
     paid_cents: i64,
     due_date: Option<String>,
@@ -203,7 +183,7 @@ pub struct Invoice {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InvoiceIssued {
-    pub customer_id: CustomerId,
+    pub customer_id: String,
     pub amount_cents: i64,
     pub due_date: String,
 }
@@ -214,7 +194,7 @@ impl DomainEvent for InvoiceIssued {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PaymentRecorded {
-    pub customer_id: CustomerId,
+    pub customer_id: String,
     pub amount_cents: i64,
 }
 
@@ -224,7 +204,7 @@ impl DomainEvent for PaymentRecorded {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InvoiceSettled {
-    pub customer_id: CustomerId,
+    pub customer_id: String,
 }
 
 impl DomainEvent for InvoiceSettled {
@@ -255,7 +235,7 @@ impl Apply<InvoiceSettled> for Invoice {
 // Command structs for Invoice aggregate
 #[derive(Debug)]
 pub struct IssueInvoice {
-    pub customer_id: CustomerId,
+    pub customer_id: String,
     pub amount_cents: i64,
     pub due_date: String,
 }
@@ -339,13 +319,13 @@ pub struct CustomerSnapshot {
     pub is_active: bool,
     pub outstanding_balance_cents: i64,
     pub last_invoice_due: Option<String>,
-    pub last_correlation_id: Option<String>,
-    pub last_updated_by: Option<String>,
+    pub last_correlation_id: String,
+    pub last_updated_by: String,
 }
 
 #[derive(Debug, Default)]
 pub struct CustomerBillingProjection {
-    customers: HashMap<CustomerId, CustomerSnapshot>,
+    customers: HashMap<String, CustomerSnapshot>,
 }
 
 impl Projection for CustomerBillingProjection {
@@ -353,31 +333,30 @@ impl Projection for CustomerBillingProjection {
 }
 
 impl CustomerBillingProjection {
-    fn touch_customer(&mut self, id: &CustomerId) -> &mut CustomerSnapshot {
-        self.customers.entry(id.clone()).or_default()
+    fn touch_customer(&mut self, id: String) -> &mut CustomerSnapshot {
+        self.customers.entry(id).or_default()
     }
 
     #[must_use]
-    pub fn customer(&self, id: &CustomerId) -> Option<&CustomerSnapshot> {
+    pub fn customer(&self, id: &str) -> Option<&CustomerSnapshot> {
         self.customers.get(id)
     }
 
     /// Iterate customers for reporting.
-    pub fn customers(&self) -> impl Iterator<Item = (&CustomerId, &CustomerSnapshot)> {
+    pub fn customers(&self) -> impl Iterator<Item = (&String, &CustomerSnapshot)> {
         self.customers.iter()
     }
 }
 
-impl ApplyProjection<SubscriptionStarted> for CustomerBillingProjection {
+impl ApplyProjection<SubscriptionStarted, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
         aggregate_id: &str,
         event: &SubscriptionStarted,
         metadata: &EventMetadata,
     ) {
-        // aggregate_id already has the "subscription::" prefix stripped
-        let customer_id = CustomerId::new(aggregate_id);
-        let snapshot = self.touch_customer(&customer_id);
+        let customer_id = aggregate_id;
+        let snapshot = self.touch_customer(customer_id.to_owned());
         snapshot.active_plan = Some(event.plan_name.clone());
         snapshot.is_active = true;
         snapshot
@@ -387,7 +366,7 @@ impl ApplyProjection<SubscriptionStarted> for CustomerBillingProjection {
     }
 }
 
-impl ApplyProjection<SubscriptionCancelled> for CustomerBillingProjection {
+impl ApplyProjection<SubscriptionCancelled, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
         aggregate_id: &str,
@@ -395,8 +374,8 @@ impl ApplyProjection<SubscriptionCancelled> for CustomerBillingProjection {
         metadata: &EventMetadata,
     ) {
         // aggregate_id already has the "subscription::" prefix stripped
-        let customer_id = CustomerId::new(aggregate_id);
-        let snapshot = self.touch_customer(&customer_id);
+        let customer_id = aggregate_id;
+        let snapshot = self.touch_customer(customer_id.to_owned());
         snapshot.is_active = false;
         snapshot
             .last_correlation_id
@@ -405,14 +384,14 @@ impl ApplyProjection<SubscriptionCancelled> for CustomerBillingProjection {
     }
 }
 
-impl ApplyProjection<InvoiceIssued> for CustomerBillingProjection {
+impl ApplyProjection<InvoiceIssued, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
         _aggregate_id: &str,
         event: &InvoiceIssued,
         metadata: &EventMetadata,
     ) {
-        let snapshot = self.touch_customer(&event.customer_id);
+        let snapshot = self.touch_customer(event.customer_id.clone());
         snapshot.outstanding_balance_cents += event.amount_cents;
         snapshot.last_invoice_due = Some(event.due_date.clone());
         snapshot
@@ -422,14 +401,14 @@ impl ApplyProjection<InvoiceIssued> for CustomerBillingProjection {
     }
 }
 
-impl ApplyProjection<PaymentRecorded> for CustomerBillingProjection {
+impl ApplyProjection<PaymentRecorded, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
         _aggregate_id: &str,
         event: &PaymentRecorded,
         metadata: &EventMetadata,
     ) {
-        let snapshot = self.touch_customer(&event.customer_id);
+        let snapshot = self.touch_customer(event.customer_id.clone());
         snapshot.outstanding_balance_cents =
             (snapshot.outstanding_balance_cents - event.amount_cents).max(0);
         snapshot
@@ -439,32 +418,19 @@ impl ApplyProjection<PaymentRecorded> for CustomerBillingProjection {
     }
 }
 
-impl ApplyProjection<InvoiceSettled> for CustomerBillingProjection {
+impl ApplyProjection<InvoiceSettled, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
         _aggregate_id: &str,
         event: &InvoiceSettled,
         metadata: &EventMetadata,
     ) {
-        let snapshot = self.touch_customer(&event.customer_id);
+        let snapshot = self.touch_customer(event.customer_id.clone());
         snapshot.outstanding_balance_cents = 0;
         snapshot
             .last_correlation_id
             .clone_from(&metadata.correlation_id);
         snapshot.last_updated_by.clone_from(&metadata.user_id);
-    }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-fn metadata(command_id: &str, correlation_id: &str, user_id: &str) -> EventMetadata {
-    EventMetadata {
-        timestamp: Some(SystemTime::now()),
-        causation_id: Some(command_id.to_string()),
-        correlation_id: Some(correlation_id.to_string()),
-        user_id: Some(user_id.to_string()),
     }
 }
 
@@ -477,7 +443,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
-    let customer_id = CustomerId::new("ACME-001");
+    let customer_id = String::from("ACME-001");
     let subscription_corr = format!("subscription/{}", customer_id.as_str());
 
     // Activate the subscription
@@ -487,7 +453,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             plan_name: "Pro Annual".into(),
             activated_at: "2024-10-01".into(),
         },
-        &metadata("cmd-start-sub", &subscription_corr, "crm-system"),
+        &EventMetadata {
+            correlation_id: subscription_corr.clone(),
+            user_id: "crm-system".to_owned(),
+        },
     )?;
 
     // Issue an invoice tied to the subscription lifecycle
@@ -501,7 +470,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             amount_cents: 12_000,
             due_date: "2024-11-01".into(),
         },
-        &metadata("cmd-issue-invoice", &invoice_corr, "billing-engine"),
+        &EventMetadata {
+            correlation_id: invoice_corr.clone(),
+            user_id: "billing-engine".to_owned(),
+        },
     )?;
 
     // Record a partial payment
@@ -510,7 +482,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &RecordPayment {
             amount_cents: 5_000,
         },
-        &metadata("cmd-payment-partial", &invoice_corr, "payments-service"),
+        &EventMetadata {
+            correlation_id: invoice_corr.clone(),
+            user_id: "payments-service".to_owned(),
+        },
     )?;
 
     // Record remaining balance
@@ -519,7 +494,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &RecordPayment {
             amount_cents: 7_000,
         },
-        &metadata("cmd-payment-final", &invoice_corr, "payments-service"),
+        &EventMetadata {
+            correlation_id: invoice_corr,
+            user_id: "payments-service".to_owned(),
+        },
     )?;
 
     // Build the read model (would typically happen asynchronously)
@@ -543,7 +521,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 reason: "customer requested cancellation".into(),
                 cancelled_at: "2024-12-31".into(),
             },
-            &metadata("cmd-cancel-sub", &subscription_corr, "crm-system"),
+            &EventMetadata {
+                correlation_id: subscription_corr,
+                user_id: "crm-system".to_owned(),
+            },
         )?;
     } else {
         println!("Subscription not cancelled – outstanding balance detected.");
@@ -580,12 +561,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(due) = &snapshot.last_invoice_due {
             println!("  Last Invoice Due: {due}");
         }
-        if let Some(correlation) = &snapshot.last_correlation_id {
-            println!("  Last Correlation ID: {correlation}");
-        }
-        if let Some(user) = &snapshot.last_updated_by {
-            println!("  Last Updated By: {user}");
-        }
+        println!("  Last Correlation ID: {}", snapshot.last_correlation_id);
         println!();
     }
 

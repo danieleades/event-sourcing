@@ -1,0 +1,65 @@
+//! Serialization strategy abstraction.
+//!
+//! `Codec` converts domain events to bytes and back. `SerializableEvent` and
+//! `ProjectionEvent` are implemented by aggregate event enums to bridge the gap
+//! between domain variants and stored representations.
+
+/// Serialisation strategy used by event stores.
+pub trait Codec {
+    type Error;
+
+    /// # Errors
+    ///
+    /// Returns an error from the codec if the event cannot be serialized.
+    fn serialize<E>(&self, event: &E) -> Result<Vec<u8>, Self::Error>
+    where
+        E: crate::event::DomainEvent;
+
+    /// # Errors
+    ///
+    /// Returns an error from the codec if the bytes cannot be decoded.
+    fn deserialize<E>(&self, data: &[u8]) -> Result<E, Self::Error>
+    where
+        E: crate::event::DomainEvent;
+}
+
+/// Trait for event sum types that can serialize themselves for persistence.
+///
+/// Implemented by aggregate event enums to serialize variants for persistence.
+///
+/// The `Aggregate` derive macro generates this automatically; hand-written enums can
+/// implement it directly if preferred. The generic `M` parameter allows passing through
+/// custom metadata types supplied by the store.
+pub trait SerializableEvent {
+    /// Serialize this event to persistable form with generic metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns a codec error if serialization fails.
+    fn to_persistable<C: Codec, M>(
+        self,
+        codec: &C,
+        metadata: M,
+    ) -> Result<crate::store::PersistableEvent<M>, C::Error>;
+}
+
+/// Trait for event sum types that can deserialize themselves from stored events.
+///
+/// Implemented by event enums to deserialize stored events.
+///
+/// Deriving [`Aggregate`](crate::Aggregate) includes a `ProjectionEvent` implementation for
+/// the generated sum type. Custom enums can opt in manually using the pattern illustrated
+/// below.
+pub trait ProjectionEvent: Sized {
+    /// The list of event kinds this sum type can deserialize.
+    ///
+    /// This data is generated automatically when using the derive macros.
+    const EVENT_KINDS: &'static [&'static str];
+
+    /// Deserialize an event from stored representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a codec error if deserialization fails.
+    fn from_stored<C: Codec>(kind: &str, data: &[u8], codec: &C) -> Result<Self, C::Error>;
+}

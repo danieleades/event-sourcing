@@ -13,8 +13,8 @@ use std::collections::HashMap;
 
 use event_sourcing::Aggregate;
 use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, EventMetadata, EventStore, InMemoryEventStore, JsonCodec,
-    Projection, Repository,
+    Apply, ApplyProjection, DomainEvent, EventStore, InMemoryEventStore, JsonCodec, Projection,
+    Repository,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 #[derive(Debug, Default, Aggregate)]
-#[aggregate(id = String, error = String, events(ProductRestocked, InventoryAdjusted), kind = "product")]
+#[aggregate(id = String, error = String, events(ProductRestocked, InventoryAdjusted))]
 struct Product;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,7 +55,7 @@ impl Apply<InventoryAdjusted> for Product {
 }
 
 #[derive(Debug, Default, Aggregate)]
-#[aggregate(id = String, error = String, events(SaleCompleted), kind = "sale")]
+#[aggregate(id = String, error = String, events(SaleCompleted))]
 struct Sale;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -74,7 +74,7 @@ impl Apply<SaleCompleted> for Sale {
 }
 
 #[derive(Debug, Default, Aggregate)]
-#[aggregate(id = String, error = String, events(PromotionApplied), kind = "promotion")]
+#[aggregate(id = String, error = String, events(PromotionApplied))]
 struct Promotion;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -104,49 +104,29 @@ struct ProductSummary {
 }
 
 impl Projection for ProductSummary {
-    type Metadata = EventMetadata;
+    type Metadata = ();
 }
 
-impl ApplyProjection<ProductRestocked, EventMetadata> for ProductSummary {
-    fn apply_projection(
-        &mut self,
-        _aggregate_id: &str,
-        event: &ProductRestocked,
-        _metadata: &EventMetadata,
-    ) {
+impl ApplyProjection<ProductRestocked, ()> for ProductSummary {
+    fn apply_projection(&mut self, _aggregate_id: &str, event: &ProductRestocked, _metadata: &()) {
         *self.stock_levels.entry(event.sku.clone()).or_default() += event.quantity;
     }
 }
 
-impl ApplyProjection<InventoryAdjusted, EventMetadata> for ProductSummary {
-    fn apply_projection(
-        &mut self,
-        _aggregate_id: &str,
-        event: &InventoryAdjusted,
-        _metadata: &EventMetadata,
-    ) {
+impl ApplyProjection<InventoryAdjusted, ()> for ProductSummary {
+    fn apply_projection(&mut self, _aggregate_id: &str, event: &InventoryAdjusted, _metadata: &()) {
         *self.stock_levels.entry(event.sku.clone()).or_default() += event.delta;
     }
 }
 
-impl ApplyProjection<SaleCompleted, EventMetadata> for ProductSummary {
-    fn apply_projection(
-        &mut self,
-        _aggregate_id: &str,
-        event: &SaleCompleted,
-        _metadata: &EventMetadata,
-    ) {
+impl ApplyProjection<SaleCompleted, ()> for ProductSummary {
+    fn apply_projection(&mut self, _aggregate_id: &str, event: &SaleCompleted, _metadata: &()) {
         *self.sales.entry(event.product_sku.clone()).or_default() += event.quantity;
     }
 }
 
-impl ApplyProjection<PromotionApplied, EventMetadata> for ProductSummary {
-    fn apply_projection(
-        &mut self,
-        _aggregate_id: &str,
-        event: &PromotionApplied,
-        _metadata: &EventMetadata,
-    ) {
+impl ApplyProjection<PromotionApplied, ()> for ProductSummary {
+    fn apply_projection(&mut self, _aggregate_id: &str, event: &PromotionApplied, _metadata: &()) {
         *self
             .promotion_totals
             .entry(event.product_sku.clone())
@@ -155,7 +135,7 @@ impl ApplyProjection<PromotionApplied, EventMetadata> for ProductSummary {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<JsonCodec, EventMetadata> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let product_id = String::from("SKU-007");
@@ -171,14 +151,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             sku: "SKU-007".into(),
             quantity: 50,
         }),
-        EventMetadata::default(),
+        (),
     )?;
     product_tx.append(
         ProductEvent::from(InventoryAdjusted {
             sku: "SKU-007".into(),
             delta: -5,
         }),
-        EventMetadata::default(),
+        (),
     )?;
     product_tx.commit()?;
 
@@ -189,7 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             product_sku: "SKU-007".into(),
             quantity: 2,
         }),
-        EventMetadata::default(),
+        (),
     )?;
     sale_tx.commit()?;
 
@@ -202,7 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             product_sku: "SKU-007".into(),
             amount_cents: 300,
         }),
-        EventMetadata::default(),
+        (),
     )?;
     promo_tx.commit()?;
 

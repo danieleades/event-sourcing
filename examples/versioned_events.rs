@@ -234,12 +234,7 @@ impl DomainEvent for OrderCancelled {
 // =============================================================================
 
 #[derive(Debug, Default, Aggregate)]
-#[aggregate(
-    id = String,
-    error = String,
-    events(OrderPlaced, OrderShipped, OrderCancelled),
-    kind = "order"
-)]
+#[aggregate(id = String, error = String, events(OrderPlaced, OrderShipped, OrderCancelled))]
 pub struct Order {
     items: Vec<OrderItem>,
     customer_id: Option<String>,

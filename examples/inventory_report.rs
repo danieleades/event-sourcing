@@ -37,12 +37,7 @@ pub struct AdjustInventory {
 }
 
 #[derive(Debug, Default, Aggregate)]
-#[aggregate(
-    id = String,
-    error = String,
-    events(ProductRestocked, InventoryAdjusted),
-    kind = "product"
-)]
+#[aggregate(id = String, error = String, events(ProductRestocked, InventoryAdjusted))]
 pub struct Product {
     // No SKU field! The ID is external metadata
     quantity: i64,
@@ -151,12 +146,7 @@ pub struct RefundSale {
 }
 
 #[derive(Debug, Default, Aggregate)]
-#[aggregate(
-    id = SaleId,
-    error = String,
-    events(SaleCompleted, SaleRefunded),
-    kind = "sale"
-)]
+#[aggregate(id = SaleId, error = String, events(SaleCompleted, SaleRefunded))]
 pub struct Sale {
     total_cents: i64,
 }
