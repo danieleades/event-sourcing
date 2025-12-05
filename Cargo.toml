@@ -24,6 +24,10 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+test-util = []
+
 [dependencies]
 event-sourcing-macros = { path = "event-sourcing-macros" }
 serde = { version = "1", features = ["derive"] }

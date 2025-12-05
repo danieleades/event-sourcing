@@ -233,13 +233,8 @@ impl DomainEvent for OrderCancelled {
 // Order Aggregate
 // =============================================================================
 
-#[derive(Debug, Default, Aggregate)]
-#[aggregate(
-    id = String,
-    error = String,
-    events(OrderPlaced, OrderShipped, OrderCancelled),
-    kind = "order"
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
+#[aggregate(id = String, error = String, events(OrderPlaced, OrderShipped, OrderCancelled))]
 pub struct Order {
     items: Vec<OrderItem>,
     customer_id: Option<String>,
@@ -247,13 +242,13 @@ pub struct Order {
     status: OrderStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OrderItem {
     product_sku: String,
     quantity: u32,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 enum OrderStatus {
     #[default]
     Pending,
