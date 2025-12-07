@@ -67,6 +67,8 @@ jobs:
       - uses: peaceiris/actions-mdbook@v2
         with:
           mdbook-version: latest
+      - name: Install mdbook-d2
+        run: cargo install mdbook-d2
       - run: mdbook test docs
 
   cargo-deny:
