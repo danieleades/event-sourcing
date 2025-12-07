@@ -104,7 +104,7 @@ mod with_test_util {
         type Error = String;
         type Id = String;
 
-        fn apply(&mut self, event: Self::Event) {
+        fn apply(&mut self, event: &Self::Event) {
             match event {
                 BankAccountEvent::Opened(e) => {
                     self.is_open = true;
@@ -196,7 +196,7 @@ mod with_test_util {
     #[test]
     fn cannot_open_already_open_account() {
         AccountTest::new()
-            .given(vec![BankAccountEvent::Opened(AccountOpened {
+            .given(&[BankAccountEvent::Opened(AccountOpened {
                 initial_balance: 0,
             })])
             .when(&OpenAccount {
@@ -208,7 +208,7 @@ mod with_test_util {
     #[test]
     fn deposit_increases_balance() {
         AccountTest::new()
-            .given(vec![BankAccountEvent::Opened(AccountOpened {
+            .given(&[BankAccountEvent::Opened(AccountOpened {
                 initial_balance: 100,
             })])
             .when(&Deposit { amount: 50 })
@@ -226,7 +226,7 @@ mod with_test_util {
     #[test]
     fn withdraw_decreases_balance() {
         AccountTest::new()
-            .given(vec![BankAccountEvent::Opened(AccountOpened {
+            .given(&[BankAccountEvent::Opened(AccountOpened {
                 initial_balance: 100,
             })])
             .when(&Withdraw { amount: 30 })
@@ -236,7 +236,7 @@ mod with_test_util {
     #[test]
     fn cannot_withdraw_more_than_balance() {
         AccountTest::new()
-            .given(vec![BankAccountEvent::Opened(AccountOpened {
+            .given(&[BankAccountEvent::Opened(AccountOpened {
                 initial_balance: 100,
             })])
             .when(&Withdraw { amount: 150 })
@@ -255,7 +255,7 @@ mod with_test_util {
     fn state_is_rebuilt_from_event_history() {
         // Verify that given() properly rebuilds state from events
         AccountTest::new()
-            .given(vec![
+            .given(&[
                 BankAccountEvent::Opened(AccountOpened {
                     initial_balance: 100,
                 }),
@@ -271,7 +271,7 @@ mod with_test_util {
     #[test]
     fn and_allows_building_complex_state() {
         AccountTest::new()
-            .given(vec![BankAccountEvent::Opened(AccountOpened {
+            .given(&[BankAccountEvent::Opened(AccountOpened {
                 initial_balance: 100,
             })])
             .and(vec![BankAccountEvent::Deposited(MoneyDeposited {
@@ -288,7 +288,7 @@ mod with_test_util {
     #[test]
     fn inspect_result_allows_custom_assertions() {
         let result = AccountTest::new()
-            .given(vec![BankAccountEvent::Opened(AccountOpened {
+            .given(&[BankAccountEvent::Opened(AccountOpened {
                 initial_balance: 100,
             })])
             .when(&Deposit { amount: 50 })
