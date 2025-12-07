@@ -5,8 +5,7 @@
 mod with_test_util {
     use event_sourcing::test::TestFramework;
     use event_sourcing::{
-        Aggregate, Apply, Codec, DomainEvent, Handle, PersistableEvent, ProjectionEvent,
-        SerializableEvent,
+        Aggregate, Codec, DomainEvent, Handle, PersistableEvent, ProjectionEvent, SerializableEvent,
     };
     use serde::{Deserialize, Serialize};
 
@@ -97,6 +96,8 @@ mod with_test_util {
         is_open: bool,
     }
 
+    // Hand-written aggregates only need to implement Aggregate::apply directly.
+    // The Apply<E> trait is only required when using #[derive(Aggregate)].
     impl Aggregate for BankAccount {
         const KIND: &'static str = "bank-account";
         type Event = BankAccountEvent;
@@ -116,25 +117,6 @@ mod with_test_util {
                     self.balance -= e.amount;
                 }
             }
-        }
-    }
-
-    impl Apply<AccountOpened> for BankAccount {
-        fn apply(&mut self, event: &AccountOpened) {
-            self.is_open = true;
-            self.balance = event.initial_balance;
-        }
-    }
-
-    impl Apply<MoneyDeposited> for BankAccount {
-        fn apply(&mut self, event: &MoneyDeposited) {
-            self.balance += event.amount;
-        }
-    }
-
-    impl Apply<MoneyWithdrawn> for BankAccount {
-        fn apply(&mut self, event: &MoneyWithdrawn) {
-            self.balance -= event.amount;
         }
     }
 

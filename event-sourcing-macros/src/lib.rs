@@ -160,9 +160,9 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
             type Error = #error_type;
             type Id = #id_type;
 
-            fn apply(&mut self, event: Self::Event) {
+            fn apply(&mut self, event: &Self::Event) {
                 match event {
-                    #(#event_enum_name::#variant_names(ref e) => ::event_sourcing::Apply::apply(self, e)),*
+                    #(#event_enum_name::#variant_names(e) => ::event_sourcing::Apply::apply(self, e)),*
                 }
             }
         }

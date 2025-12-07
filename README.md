@@ -204,6 +204,11 @@ cargo run --example versioned_events
 cargo run --example advanced_projection
 ```
 
+## Documentation
+
+**[Full documentation](https://danieleades.github.io/event-sourcing/)** — Conceptual guides,
+API reference, and runnable examples.
+
 ## Status
 
 The crate is still pre-1.0. Expect APIs to evolve as real-world usage grows. Feedback and

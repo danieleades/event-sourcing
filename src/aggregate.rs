@@ -40,7 +40,10 @@ pub trait Aggregate: Default + Sized + Serialize + DeserializeOwned {
     /// Apply an event to update aggregate state.
     ///
     /// This is called during event replay to rebuild aggregate state from history.
-    fn apply(&mut self, event: Self::Event);
+    ///
+    /// When using `#[derive(Aggregate)]`, this dispatches to your `Apply<E>` implementations.
+    /// For hand-written aggregates, implement this directly with a match expression.
+    fn apply(&mut self, event: &Self::Event);
 }
 
 /// Mutate an aggregate with a domain event.
@@ -151,7 +154,7 @@ where
             // Sum type deserializes itself
             let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
                 .map_err(ProjectionError::Codec)?;
-            aggregate.apply(event);
+            aggregate.apply(&event);
         }
 
         Ok(aggregate)

@@ -60,6 +60,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --no-deps
 
+  mdbook-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: latest
+      - run: mdbook test docs
+
   cargo-deny:
     runs-on: ubuntu-latest
     steps:
@@ -90,6 +99,7 @@ jobs:
         lint,
         msrv,
         docs,
+        mdbook-test,
         cargo-deny,
         coverage,
       ]

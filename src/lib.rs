@@ -104,7 +104,7 @@ mod tests {
         type Error = String;
         type Id = String;
 
-        fn apply(&mut self, event: Self::Event) {
+        fn apply(&mut self, event: &Self::Event) {
             match event {
                 CounterEvent::Added(e) => self.value += e.amount,
                 CounterEvent::Subtracted(e) => self.value -= e.amount,

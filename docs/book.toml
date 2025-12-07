@@ -1,0 +1,22 @@
+[book]
+title = "Event Sourcing in Rust"
+authors = ["Daniel Eades"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/danieleades/event-sourcing"
+edit-url-template = "https://github.com/danieleades/event-sourcing/edit/main/docs/{path}"
+
+[output.html.playground]
+editable = true
+line-numbers = true
+
+[preprocessor.d2]
+
+[output.html.fold]
+enable = true
+level = 1
