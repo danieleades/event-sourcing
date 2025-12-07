@@ -463,7 +463,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for stored_event in &events {
         let event = OrderEvent::from_stored(&stored_event.kind, &stored_event.data, codec)?;
-        Aggregate::apply(&mut order, event);
+        Aggregate::apply(&mut order, &event);
         println!("   Applied event: {}", stored_event.kind);
     }
 

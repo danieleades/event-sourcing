@@ -78,7 +78,7 @@ impl<A: Aggregate> TestFramework<A> {
     /// The events are applied in order to rebuild the aggregate state
     /// before the command is executed.
     #[must_use]
-    pub fn given(self, events: Vec<A::Event>) -> TestExecutor<A> {
+    pub fn given(self, events: &[A::Event]) -> TestExecutor<A> {
         let mut aggregate = A::default();
         for event in events {
             aggregate.apply(event);
@@ -111,7 +111,7 @@ impl<A: Aggregate> TestExecutor<A> {
     #[must_use]
     pub fn and(mut self, events: Vec<A::Event>) -> Self {
         for event in events {
-            self.aggregate.apply(event);
+            self.aggregate.apply(&event);
         }
         self
     }
@@ -286,7 +286,7 @@ mod tests {
         type Error = String;
         type Id = String;
 
-        fn apply(&mut self, event: Self::Event) {
+        fn apply(&mut self, event: &Self::Event) {
             match event {
                 CounterEvent::Added(e) => self.value += e.amount,
                 CounterEvent::Subtracted(e) => self.value -= e.amount,
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn given_events_when_subtract_then_produces_event() {
         CounterTest::new()
-            .given(vec![CounterEvent::Added(ValueAdded { amount: 20 })])
+            .given(&[CounterEvent::Added(ValueAdded { amount: 20 })])
             .when(&SubtractValue { amount: 5 })
             .then_expect_events(&[CounterEvent::Subtracted(ValueSubtracted { amount: 5 })]);
     }
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn given_insufficient_balance_when_subtract_then_error() {
         CounterTest::new()
-            .given(vec![CounterEvent::Added(ValueAdded { amount: 10 })])
+            .given(&[CounterEvent::Added(ValueAdded { amount: 10 })])
             .when(&SubtractValue { amount: 20 })
             .then_expect_error();
     }
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn given_insufficient_balance_when_subtract_then_error_message() {
         CounterTest::new()
-            .given(vec![CounterEvent::Added(ValueAdded { amount: 10 })])
+            .given(&[CounterEvent::Added(ValueAdded { amount: 10 })])
             .when(&SubtractValue { amount: 20 })
             .then_expect_error_message("insufficient value");
     }
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn given_events_and_more_events_when_command() {
         CounterTest::new()
-            .given(vec![CounterEvent::Added(ValueAdded { amount: 10 })])
+            .given(&[CounterEvent::Added(ValueAdded { amount: 10 })])
             .and(vec![CounterEvent::Added(ValueAdded { amount: 5 })])
             .when(&SubtractValue { amount: 12 })
             .then_expect_events(&[CounterEvent::Subtracted(ValueSubtracted { amount: 12 })]);

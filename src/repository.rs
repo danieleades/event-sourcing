@@ -223,7 +223,7 @@ where
             let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
                 .map_err(ProjectionError::Codec)
                 .map_err(CommandError::Projection)?;
-            aggregate.apply(event);
+            aggregate.apply(&event);
             events_replayed += 1;
             last_position = stored.position.into();
         }
@@ -249,7 +249,7 @@ where
 
         // Apply new events to aggregate for potential snapshotting
         for event in new_events {
-            aggregate.apply(event);
+            aggregate.apply(&event);
             last_position += 1; // Approximate new positions
         }
 
