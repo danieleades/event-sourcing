@@ -6,6 +6,22 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Ident, Path, parse_macro_input};
 
+/// Converts a `PascalCase` or `camelCase` string to `kebab-case`.
+fn to_kebab_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('-');
+            }
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Wrapper for `syn::Path` that parses from `key = Type` syntax.
 #[derive(Debug)]
 struct TypePath(Path);
@@ -95,7 +111,7 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
 
     let kind = args
         .kind
-        .unwrap_or_else(|| struct_name.to_string().to_lowercase());
+        .unwrap_or_else(|| to_kebab_case(&struct_name.to_string()));
 
     let event_enum_name = args.event_enum.map_or_else(
         || Ident::new(&format!("{struct_name}Event"), struct_name.span()),
@@ -128,7 +144,17 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
             ) -> Result<Self, C::Error> {
                 match kind {
                     #(#event_types::KIND => Ok(Self::#variant_names(codec.deserialize(data)?)),)*
-                    _ => panic!("Unknown event kind: {}", kind),
+                    unknown => {
+                        // Return a codec error instead of panicking.
+                        // We trigger an error by attempting to deserialize invalid JSON
+                        // that contains an informative message about the unknown kind.
+                        let error_json = ::std::format!(
+                            r#"{{"__event_sourcing_unknown_kind":"{}"}}"#,
+                            unknown
+                        );
+                        codec.deserialize::<()>(error_json.as_bytes())
+                            .map(|_| unreachable!("deserializing into () should always fail"))
+                    }
                 }
             }
         }

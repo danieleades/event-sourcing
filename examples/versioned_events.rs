@@ -353,7 +353,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Versioned Events with Event Sourcing ===\n");
 
     // Use OrderMetadata (versioned) as the metadata type for the store
-    let store: InMemoryEventStore<JsonCodec, OrderMetadata> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<String, JsonCodec, OrderMetadata> =
+        InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     // ========================================
@@ -393,7 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================
     println!("3. Creating new order with current schema (V3)...");
 
-    let order_id = "ORD-001";
+    let order_id = "ORD-001".to_string();
     let metadata = OrderMetadata {
         timestamp: Some(std::time::SystemTime::now()),
         user_id: Some("user-789".to_string()),
@@ -402,7 +403,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     repository.execute_command::<Order, PlaceOrder>(
-        &order_id.to_string(),
+        &order_id,
         &PlaceOrder {
             product_sku: "DOOHICKEY-003".to_string(),
             quantity: 10,
@@ -420,7 +421,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .load_events(&[EventFilter::for_aggregate(
             OrderPlaced::KIND,
             Order::KIND,
-            order_id,
+            order_id.clone(),
         )])?;
     if let Some(stored_event) = events.first() {
         let json = String::from_utf8_lossy(&stored_event.data);
@@ -438,7 +439,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n4. Shipping the order...");
 
     repository.execute_command::<Order, ShipOrder>(
-        &order_id.to_string(),
+        &order_id,
         &ShipOrder {
             tracking_number: "TRACK-123456".to_string(),
         },
@@ -454,9 +455,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load all event kinds for this aggregate
     let events = repository.event_store().load_events(&[
-        EventFilter::for_aggregate(OrderPlaced::KIND, Order::KIND, order_id),
-        EventFilter::for_aggregate(OrderShipped::KIND, Order::KIND, order_id),
-        EventFilter::for_aggregate(OrderCancelled::KIND, Order::KIND, order_id),
+        EventFilter::for_aggregate(OrderPlaced::KIND, Order::KIND, order_id.clone()),
+        EventFilter::for_aggregate(OrderShipped::KIND, Order::KIND, order_id.clone()),
+        EventFilter::for_aggregate(OrderCancelled::KIND, Order::KIND, order_id.clone()),
     ])?;
     let codec = repository.event_store().codec();
     let mut order = Order::default();

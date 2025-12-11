@@ -6,12 +6,13 @@
 // Re-export the derive macros so users only need one import
 pub use event_sourcing_macros::Aggregate;
 
-use std::{fmt, marker::PhantomData};
+use std::marker::PhantomData;
 
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     codec::{Codec, ProjectionEvent},
+    concurrency::ConcurrencyStrategy,
     projection::ProjectionError,
     repository::Repository,
     snapshot::SnapshotStore,
@@ -95,23 +96,25 @@ pub trait Handle<C>: Aggregate {
 }
 
 /// Builder for loading aggregates by ID.
-pub struct AggregateBuilder<'a, S, SS, A>
+pub struct AggregateBuilder<'a, S, SS, C, A>
 where
     S: EventStore,
-    SS: SnapshotStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
     A: Aggregate,
 {
-    pub(super) repository: &'a Repository<S, SS>,
+    pub(super) repository: &'a Repository<S, SS, C>,
     pub(super) _phantom: PhantomData<A>,
 }
 
-impl<'a, S, SS, A> AggregateBuilder<'a, S, SS, A>
+impl<'a, S, SS, C, A> AggregateBuilder<'a, S, SS, C, A>
 where
     S: EventStore,
-    SS: SnapshotStore,
-    A: Aggregate,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
+    A: Aggregate<Id = S::Id>,
 {
-    pub(super) const fn new(repository: &'a Repository<S, SS>) -> Self {
+    pub(super) const fn new(repository: &'a Repository<S, SS, C>) -> Self {
         Self {
             repository,
             _phantom: PhantomData,
@@ -128,17 +131,15 @@ where
     /// Returns an error if the store fails to load events or if events cannot be deserialized.
     pub fn load(
         self,
-        id: &A::Id,
+        id: &S::Id,
     ) -> Result<A, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
     where
         A::Event: ProjectionEvent,
-        A::Id: fmt::Display,
     {
         // Build filters for all event kinds for this specific aggregate
-        let aggregate_id = id.to_string();
-        let filters: Vec<EventFilter> = A::Event::EVENT_KINDS
+        let filters: Vec<EventFilter<S::Id, S::Position>> = A::Event::EVENT_KINDS
             .iter()
-            .map(|kind| EventFilter::for_aggregate(*kind, A::KIND, aggregate_id.clone()))
+            .map(|kind| EventFilter::for_aggregate(*kind, A::KIND, id.clone()))
             .collect();
 
         let events = self

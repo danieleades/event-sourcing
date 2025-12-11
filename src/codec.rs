@@ -6,21 +6,25 @@
 
 /// Serialisation strategy used by event stores.
 pub trait Codec {
-    type Error;
+    type Error: std::error::Error;
 
+    /// Serialize a value for persistence.
+    ///
     /// # Errors
     ///
-    /// Returns an error from the codec if the event cannot be serialized.
-    fn serialize<E>(&self, event: &E) -> Result<Vec<u8>, Self::Error>
+    /// Returns an error from the codec if the value cannot be serialized.
+    fn serialize<T>(&self, value: &T) -> Result<Vec<u8>, Self::Error>
     where
-        E: crate::event::DomainEvent;
+        T: serde::Serialize;
 
+    /// Deserialize a value from stored bytes.
+    ///
     /// # Errors
     ///
     /// Returns an error from the codec if the bytes cannot be decoded.
-    fn deserialize<E>(&self, data: &[u8]) -> Result<E, Self::Error>
+    fn deserialize<T>(&self, data: &[u8]) -> Result<T, Self::Error>
     where
-        E: crate::event::DomainEvent;
+        T: serde::de::DeserializeOwned;
 }
 
 /// Trait for event sum types that can serialize themselves for persistence.

@@ -19,10 +19,14 @@ use std::convert::Infallible;
 ///
 /// Schema evolution is handled at the serialization layer (e.g., via `serde_evolve`),
 /// so no version field is needed here.
+///
+/// # Type Parameters
+///
+/// - `Pos`: The position type used by the event store (e.g., `u64`, `i64`, etc.)
 #[derive(Clone, Debug)]
-pub struct Snapshot {
+pub struct Snapshot<Pos> {
     /// Event position when this snapshot was taken.
-    pub position: u64,
+    pub position: Pos,
     /// Serialized aggregate state.
     pub data: Vec<u8>,
 }
@@ -40,6 +44,16 @@ pub struct Snapshot {
 /// - Every N events: balance between storage and replay cost
 /// - Never save: read-only replicas that only load snapshots created elsewhere
 pub trait SnapshotStore {
+    /// Aggregate identifier type.
+    ///
+    /// Must match the `EventStore::Id` type used in the same repository.
+    type Id;
+
+    /// Position type for tracking snapshot positions.
+    ///
+    /// Must match the `EventStore::Position` type used in the same repository.
+    type Position;
+
     /// Error type for snapshot operations.
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -53,8 +67,8 @@ pub trait SnapshotStore {
     fn load(
         &self,
         aggregate_kind: &str,
-        aggregate_id: &str,
-    ) -> Result<Option<Snapshot>, Self::Error>;
+        aggregate_id: &Self::Id,
+    ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
 
     /// Offer a snapshot for storage.
     ///
@@ -74,8 +88,8 @@ pub trait SnapshotStore {
     fn offer_snapshot(
         &mut self,
         aggregate_kind: &str,
-        aggregate_id: &str,
-        snapshot: Snapshot,
+        aggregate_id: &Self::Id,
+        snapshot: Snapshot<Self::Position>,
         events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error>;
 }
@@ -87,25 +101,37 @@ pub trait SnapshotStore {
 /// - Silently discards all offered snapshots
 ///
 /// Use this as the default when snapshots are not needed.
+///
+/// Generic over `Id` and `Pos` to match the `EventStore` types.
 #[derive(Clone, Debug, Default)]
-pub struct NoSnapshots;
+pub struct NoSnapshots<Id, Pos>(std::marker::PhantomData<(Id, Pos)>);
 
-impl SnapshotStore for NoSnapshots {
+impl<Id, Pos> NoSnapshots<Id, Pos> {
+    /// Create a new no-op snapshot store.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<Id, Pos> SnapshotStore for NoSnapshots<Id, Pos> {
+    type Id = Id;
+    type Position = Pos;
     type Error = Infallible;
 
     fn load(
         &self,
         _aggregate_kind: &str,
-        _aggregate_id: &str,
-    ) -> Result<Option<Snapshot>, Self::Error> {
+        _aggregate_id: &Self::Id,
+    ) -> Result<Option<Snapshot<Pos>>, Self::Error> {
         Ok(None)
     }
 
     fn offer_snapshot(
         &mut self,
         _aggregate_kind: &str,
-        _aggregate_id: &str,
-        _snapshot: Snapshot,
+        _aggregate_id: &Self::Id,
+        _snapshot: Snapshot<Pos>,
         _events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error> {
         Ok(())
@@ -138,6 +164,8 @@ impl SnapshotPolicy {
 /// This is a reference implementation suitable for testing and development.
 /// Production systems should implement [`SnapshotStore`] with durable storage.
 ///
+/// Generic over `Id` and `Pos` to match the `EventStore` types.
+///
 /// # Example
 ///
 /// ```ignore
@@ -147,18 +175,20 @@ impl SnapshotPolicy {
 ///     .with_snapshots(InMemorySnapshotStore::every(100));
 /// ```
 #[derive(Clone, Debug)]
-pub struct InMemorySnapshotStore {
-    snapshots: HashMap<String, Snapshot>,
+pub struct InMemorySnapshotStore<Id, Pos> {
+    snapshots: HashMap<String, Snapshot<Pos>>,
     policy: SnapshotPolicy,
+    _phantom: std::marker::PhantomData<Id>,
 }
 
-impl InMemorySnapshotStore {
+impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
     /// Create a snapshot store that saves after every command.
     #[must_use]
     pub fn always() -> Self {
         Self {
             snapshots: HashMap::new(),
             policy: SnapshotPolicy::Always,
+            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -168,6 +198,7 @@ impl InMemorySnapshotStore {
         Self {
             snapshots: HashMap::new(),
             policy: SnapshotPolicy::EveryNEvents(n),
+            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -179,28 +210,33 @@ impl InMemorySnapshotStore {
         Self {
             snapshots: HashMap::new(),
             policy: SnapshotPolicy::Never,
+            _phantom: std::marker::PhantomData,
         }
     }
+}
 
-    fn key(aggregate_kind: &str, aggregate_id: &str) -> String {
+impl<Id: std::fmt::Display, Pos> InMemorySnapshotStore<Id, Pos> {
+    fn key(aggregate_kind: &str, aggregate_id: &Id) -> String {
         format!("{aggregate_kind}::{aggregate_id}")
     }
 }
 
-impl Default for InMemorySnapshotStore {
+impl<Id, Pos> Default for InMemorySnapshotStore<Id, Pos> {
     fn default() -> Self {
         Self::always()
     }
 }
 
-impl SnapshotStore for InMemorySnapshotStore {
+impl<Id: std::fmt::Display, Pos: Clone> SnapshotStore for InMemorySnapshotStore<Id, Pos> {
+    type Id = Id;
+    type Position = Pos;
     type Error = Infallible;
 
     fn load(
         &self,
         aggregate_kind: &str,
-        aggregate_id: &str,
-    ) -> Result<Option<Snapshot>, Self::Error> {
+        aggregate_id: &Self::Id,
+    ) -> Result<Option<Snapshot<Pos>>, Self::Error> {
         let key = Self::key(aggregate_kind, aggregate_id);
         Ok(self.snapshots.get(&key).cloned())
     }
@@ -208,8 +244,8 @@ impl SnapshotStore for InMemorySnapshotStore {
     fn offer_snapshot(
         &mut self,
         aggregate_kind: &str,
-        aggregate_id: &str,
-        snapshot: Snapshot,
+        aggregate_id: &Self::Id,
+        snapshot: Snapshot<Pos>,
         events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error> {
         if self.policy.should_snapshot(events_since_last_snapshot) {

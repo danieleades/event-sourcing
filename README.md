@@ -54,10 +54,10 @@ This crate borrows inspiration from projects like
   like `cqrs`. Instead, you can migrate historical events transparently inside your codec
   (see [`examples/versioned_events.rs`](examples/versioned_events.rs)).
 
-- **No optimistic mutation hooks (yet).** `eventually` ships batteries-included APIs for
-  version-checked mutations. This crate intentionally keeps the repository/store layer lean
-  and does not currently expose an optimistic concurrency hook. Adding that capability is on
-  the roadmap; contributions welcome.
+- **Type-safe optimistic concurrency.** Enable version-checked mutations by calling
+  `repo.with_optimistic_concurrency()`. Conflicts are detected at the type level—the
+  `Optimistic` strategy returns `OptimisticCommandError::Concurrency` when the stream
+  version changes between load and commit. See [`examples/optimistic_concurrency.rs`](examples/optimistic_concurrency.rs).
 
 ## Quick start
 
@@ -126,10 +126,10 @@ impl Projection for AccountBalance {
     type Metadata = ();
 }
 
-impl ApplyProjection<FundsDeposited, ()> for AccountBalance {
+impl ApplyProjection<String, FundsDeposited, ()> for AccountBalance {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &str,
+        _aggregate_id: &String,
         event: &FundsDeposited,
         _metadata: &(),
     ) {
@@ -138,7 +138,7 @@ impl ApplyProjection<FundsDeposited, ()> for AccountBalance {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let account_id = "ACC-001".to_string();
@@ -198,10 +198,12 @@ event streams.
 ## Running the examples
 
 ```shell
+cargo run --example quickstart
 cargo run --example inventory_report
 cargo run --example subscription_billing
 cargo run --example versioned_events
 cargo run --example advanced_projection
+cargo run --example optimistic_concurrency
 ```
 
 ## Documentation

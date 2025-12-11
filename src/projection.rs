@@ -3,11 +3,15 @@
 //! Projections rebuild query models from streams of stored events. This module
 //! provides the projection trait, event application hooks, the optional
 //! `EventEnvelope`, and the `ProjectionBuilder` that wires everything together.
-use std::{fmt, marker::PhantomData};
+use std::collections::HashMap;
+use std::marker::PhantomData;
+
+use thiserror::Error;
 
 use crate::{
     aggregate::Aggregate,
     codec::Codec,
+    concurrency::ConcurrencyStrategy,
     event::DomainEvent,
     repository::Repository,
     snapshot::SnapshotStore,
@@ -26,99 +30,86 @@ pub trait Projection: Default + Sized {
 
 /// Apply an event to a projection with access to envelope context.
 ///
-/// Implementations receive the aggregate identifier (already stripped of its kind prefix),
-/// the pure domain event, and metadata supplied by the backing store.
+/// Implementations receive the aggregate identifier, the pure domain event,
+/// and metadata supplied by the backing store.
 ///
 /// ```ignore
-/// impl ApplyProjection<InventoryAdjusted, ()> for InventoryReport {
-///     fn apply_projection(&mut self, aggregate_id: &str, event: &InventoryAdjusted, _metadata: &()) {
-///         let sku = aggregate_id; // "product::" prefix was removed
-///         let stats = self.products.entry(sku.to_string()).or_default();
+/// impl ApplyProjection<String, InventoryAdjusted, ()> for InventoryReport {
+///     fn apply_projection(&mut self, aggregate_id: &String, event: &InventoryAdjusted, _metadata: &()) {
+///         let stats = self.products.entry(aggregate_id.clone()).or_default();
 ///         stats.quantity += event.delta;
 ///     }
 /// }
 /// ```
-pub trait ApplyProjection<E, M> {
-    fn apply_projection(&mut self, aggregate_id: &str, event: &E, metadata: &M);
+pub trait ApplyProjection<Id, E, M> {
+    fn apply_projection(&mut self, aggregate_id: &Id, event: &E, metadata: &M);
 }
 
 /// Errors that can occur when rebuilding a projection.
-#[derive(Debug)]
-pub enum ProjectionError<StoreError, CodecError> {
-    Store(StoreError),
-    Codec(CodecError),
-}
-
-impl<StoreError, CodecError> fmt::Display for ProjectionError<StoreError, CodecError>
+#[derive(Debug, Error)]
+pub enum ProjectionError<StoreError, CodecError>
 where
-    StoreError: fmt::Display,
-    CodecError: fmt::Display,
+    StoreError: std::error::Error + 'static,
+    CodecError: std::error::Error + 'static,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Store(error) => write!(f, "failed to load events: {error}"),
-            Self::Codec(error) => write!(f, "failed to decode event: {error}"),
-        }
-    }
-}
-
-impl<StoreError, CodecError> std::error::Error for ProjectionError<StoreError, CodecError>
-where
-    StoreError: fmt::Debug + fmt::Display + std::error::Error + 'static,
-    CodecError: fmt::Debug + fmt::Display + std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Store(error) => Some(error),
-            Self::Codec(error) => Some(error),
-        }
-    }
+    #[error("failed to load events: {0}")]
+    Store(#[source] StoreError),
+    #[error("failed to decode event: {0}")]
+    Codec(#[source] CodecError),
+    #[error("failed to deserialize snapshot: {0}")]
+    SnapshotDeserialize(#[source] CodecError),
 }
 
 /// Type alias for event handler closures.
 type EventHandler<P, S> = Box<
     dyn Fn(
         &mut P,
-        &str,
+        &<S as EventStore>::Id,
         &[u8],
         &<S as EventStore>::Metadata,
         &<S as EventStore>::Codec,
     ) -> Result<(), <<S as EventStore>::Codec as Codec>::Error>,
 >;
 
-/// Internal type pairing an event filter with its dispatch handler.
-struct RegisteredEvent<P, S: EventStore> {
-    filter: EventFilter,
-    apply: EventHandler<P, S>,
-}
-
 /// Builder used to configure which events should be loaded for a projection.
-pub struct ProjectionBuilder<'a, S, SS, P>
+pub struct ProjectionBuilder<'a, S, SS, C, P>
 where
     S: EventStore,
-    SS: SnapshotStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
     P: Projection,
 {
-    pub(super) repository: &'a Repository<S, SS>,
-    registered: Vec<RegisteredEvent<P, S>>,
+    pub(super) repository: &'a Repository<S, SS, C>,
+    /// Event kind -> handler mapping for O(1) dispatch
+    handlers: HashMap<String, EventHandler<P, S>>,
+    /// Filters for loading events from the store
+    filters: Vec<EventFilter<S::Id, S::Position>>,
     pub(super) _phantom: PhantomData<P>,
 }
 
-impl<'a, S, SS, P> ProjectionBuilder<'a, S, SS, P>
+impl<'a, S, SS, C, P> ProjectionBuilder<'a, S, SS, C, P>
 where
     S: EventStore,
-    SS: SnapshotStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
     P: Projection,
 {
-    pub(super) const fn new(repository: &'a Repository<S, SS>) -> Self {
+    pub(super) fn new(repository: &'a Repository<S, SS, C>) -> Self {
         Self {
             repository,
-            registered: Vec::new(),
+            handlers: HashMap::new(),
+            filters: Vec::new(),
             _phantom: PhantomData,
         }
     }
 
     /// Register a specific event type to load from all aggregates.
+    ///
+    /// # Type Constraints
+    ///
+    /// The store's metadata type must be convertible to the projection's metadata type.
+    /// `Clone` is required because event handlers receive metadata by reference, but
+    /// `Into::into()` requires ownership. The metadata is cloned once per event.
     ///
     /// # Example
     /// ```ignore
@@ -128,18 +119,19 @@ where
     pub fn event<E>(mut self) -> Self
     where
         E: DomainEvent,
-        P: ApplyProjection<E, P::Metadata>,
+        P: ApplyProjection<S::Id, E, P::Metadata>,
         S::Metadata: Clone + Into<P::Metadata>,
     {
-        self.registered.push(RegisteredEvent {
-            filter: EventFilter::for_event(E::KIND),
-            apply: Box::new(|proj, agg_id, data, metadata, codec| {
+        self.filters.push(EventFilter::for_event(E::KIND));
+        self.handlers.insert(
+            E::KIND.to_string(),
+            Box::new(|proj, agg_id, data, metadata, codec| {
                 let event: E = codec.deserialize(data)?;
                 let metadata_converted: P::Metadata = metadata.clone().into();
                 ApplyProjection::apply_projection(proj, agg_id, &event, &metadata_converted);
                 Ok(())
             }),
-        });
+        );
         self
     }
 
@@ -150,23 +142,27 @@ where
     /// builder.event_for::<Account, FundsDeposited>(&account_id); // One account stream
     /// ```
     #[must_use]
-    pub fn event_for<A, E>(mut self, aggregate_id: &A::Id) -> Self
+    pub fn event_for<A, E>(mut self, aggregate_id: &S::Id) -> Self
     where
-        A: Aggregate,
-        A::Id: fmt::Display,
+        A: Aggregate<Id = S::Id>,
         E: DomainEvent,
-        P: ApplyProjection<E, P::Metadata>,
+        P: ApplyProjection<S::Id, E, P::Metadata>,
         S::Metadata: Clone + Into<P::Metadata>,
     {
-        self.registered.push(RegisteredEvent {
-            filter: EventFilter::for_aggregate(E::KIND, A::KIND, aggregate_id.to_string()),
-            apply: Box::new(|proj, agg_id, data, metadata, codec| {
+        self.filters.push(EventFilter::for_aggregate(
+            E::KIND,
+            A::KIND,
+            aggregate_id.clone(),
+        ));
+        self.handlers.insert(
+            E::KIND.to_string(),
+            Box::new(|proj, agg_id, data, metadata, codec| {
                 let event: E = codec.deserialize(data)?;
                 let metadata_converted: P::Metadata = metadata.clone().into();
                 ApplyProjection::apply_projection(proj, agg_id, &event, &metadata_converted);
                 Ok(())
             }),
-        });
+        );
         self
     }
 
@@ -185,12 +181,10 @@ where
         S::Metadata: Into<P::Metadata>,
         P::Metadata: From<S::Metadata>,
     {
-        let filters: Vec<EventFilter> = self.registered.iter().map(|r| r.filter.clone()).collect();
-
         let events = self
             .repository
             .store
-            .load_events(&filters)
+            .load_events(&self.filters)
             .map_err(ProjectionError::Store)?;
         let codec = self.repository.store.codec();
         let mut projection = P::default();
@@ -204,14 +198,13 @@ where
                 ..
             } = stored;
 
-            // Find the registered handler for this event kind and invoke it
-            for reg in &self.registered {
-                if reg.filter.event_kind == kind {
-                    (reg.apply)(&mut projection, &aggregate_id, &data, &metadata, codec)
-                        .map_err(ProjectionError::Codec)?;
-                    break;
-                }
+            // O(1) handler lookup instead of O(n) linear scan
+            if let Some(handler) = self.handlers.get(&kind) {
+                (handler)(&mut projection, &aggregate_id, &data, &metadata, codec)
+                    .map_err(ProjectionError::Codec)?;
             }
+            // Unknown kinds are intentionally skipped - projections only care about
+            // the events they explicitly registered handlers for
         }
 
         Ok(projection)
