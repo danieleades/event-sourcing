@@ -64,14 +64,17 @@ The crate models CQRS through:
 
 ```rust,ignore
 // Write: execute a command
-repository.execute_command::<Account, Deposit>(&id, &command, &metadata)?;
+repository
+    .execute_command::<Account, Deposit>(&id, &command, &metadata)
+    .await?;
 
 // Read: build a projection
 let summary = repository
     .build_projection::<AccountSummary>()
     .event::<FundsDeposited>()
     .event::<FundsWithdrawn>()
-    .load()?;
+    .load()
+    .await?;
 ```
 
 ## Eventual Consistency

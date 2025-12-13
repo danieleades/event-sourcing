@@ -25,7 +25,7 @@ pub enum EventDecodeError<CodecError> {
 /// Serialisation strategy used by event stores.
 // ANCHOR: codec_trait
 pub trait Codec {
-    type Error: std::error::Error;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// Serialize a value for persistence.
     ///

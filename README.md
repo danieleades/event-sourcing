@@ -62,7 +62,9 @@ This crate borrows inspiration from projects like
   load and commit. For automatic retry on conflicts, use `execute_with_retry`:
 
   ```rust,ignore
-  let attempts = repo.execute_with_retry::<Account, Deposit>(&id, &cmd, &(), 3)?;
+  let attempts = repo
+      .execute_with_retry::<Account, Deposit>(&id, &cmd, &(), 3)
+      .await?;
   println!("Succeeded after {attempts} attempt(s)");
   ```
 
@@ -147,7 +149,8 @@ impl ApplyProjection<FundsDeposited> for AccountBalance {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
@@ -157,12 +160,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &account_id,
         &command,
         &(),
-    )?;
+    )
+    .await?;
 
     let summary = repository
         .build_projection::<AccountBalance>()
         .event::<FundsDeposited>()
-        .load()?;
+        .load()
+        .await?;
     assert_eq!(summary.total_cents, 25_00);
     Ok(())
 }
@@ -186,7 +191,7 @@ Read models that keep their state in sync by replaying events. Projections imple
 requirements via the `Projection` trait. Build them by calling
 `Repository::build_projection::<P>()`, chaining the relevant `.event::<E>()` / `.event_for::<A, E>()`
 registrations (or `.events::<A::Event>()` / `.events_for::<A>()` for aggregate event enums), and
-finally `.load()`.
+finally `.load().await`.
 
 ### Event context
 

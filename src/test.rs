@@ -56,6 +56,7 @@
 //! ```
 
 use std::fmt;
+use std::future::Future;
 use std::marker::PhantomData;
 
 use thiserror::Error;
@@ -152,7 +153,7 @@ where
     }
 }
 
-pub trait RepositoryTestExt: StoreAccess {
+pub trait RepositoryTestExt: StoreAccess + Send {
     /// Seed events for an aggregate, bypassing command handlers.
     ///
     /// Events are serialized through the codec, ensuring they can be loaded
@@ -168,25 +169,28 @@ pub trait RepositoryTestExt: StoreAccess {
     ///
     /// Returns [`SeedError::Codec`] if event serialization fails, or
     /// [`SeedError::Store`] if persistence fails.
-    fn seed_events<A>(
-        &mut self,
+    fn seed_events<'a, A>(
+        &'a mut self,
         id: &<Self::Store as EventStore>::Id,
         events: Vec<A::Event>,
-    ) -> SeedResult<Self::Store>
+    ) -> impl Future<Output = SeedResult<Self::Store>> + Send + 'a
     where
         A: Aggregate<Id = <Self::Store as EventStore>::Id>,
-        A::Event: SerializableEvent,
+        A::Event: SerializableEvent + Send + 'a,
         <Self::Store as EventStore>::Metadata: Default,
     {
-        let store = self.store_mut();
-        let mut tx = store.begin::<Unchecked>(A::KIND, id.clone(), None);
+        let id = id.clone();
+        async move {
+            let store = self.store_mut();
+            let mut tx = store.begin::<Unchecked>(A::KIND, id, None);
 
-        for event in events {
-            tx.append(event, <Self::Store as EventStore>::Metadata::default())
-                .map_err(SeedError::Codec)?;
+            for event in events {
+                tx.append(event, <Self::Store as EventStore>::Metadata::default())
+                    .map_err(SeedError::Codec)?;
+            }
+
+            tx.commit().await.map_err(SeedError::Store)
         }
-
-        tx.commit().map_err(SeedError::Store)
     }
 
     /// Inject a single event as if from a concurrent writer.
@@ -206,32 +210,36 @@ pub trait RepositoryTestExt: StoreAccess {
     ///
     /// Returns [`SeedError::Codec`] if serialization fails, or
     /// [`SeedError::Store`] if persistence fails.
-    fn inject_concurrent_event<A>(
-        &mut self,
+    fn inject_concurrent_event<'a, A>(
+        &'a mut self,
         id: &<Self::Store as EventStore>::Id,
         event: A::Event,
-    ) -> SeedResult<Self::Store>
+    ) -> impl Future<Output = SeedResult<Self::Store>> + Send + 'a
     where
         A: Aggregate<Id = <Self::Store as EventStore>::Id>,
-        A::Event: SerializableEvent,
+        A::Event: SerializableEvent + Send + 'a,
         <Self::Store as EventStore>::Metadata: Default,
     {
-        let store = self.store_mut();
-        let persistable = event
-            .to_persistable(
-                store.codec(),
-                <Self::Store as EventStore>::Metadata::default(),
-            )
-            .map_err(SeedError::Codec)?;
+        let id = id.clone();
+        async move {
+            let store = self.store_mut();
+            let persistable = event
+                .to_persistable(
+                    store.codec(),
+                    <Self::Store as EventStore>::Metadata::default(),
+                )
+                .map_err(SeedError::Codec)?;
 
-        store
-            .append(A::KIND, id, None, vec![persistable])
-            .map_err(|e| match e {
-                AppendError::Store(e) => SeedError::Store(e),
-                AppendError::Conflict(_) => {
-                    unreachable!("no version check on inject_concurrent_event")
-                }
-            })
+            store
+                .append(A::KIND, &id, None, vec![persistable])
+                .await
+                .map_err(|e| match e {
+                    AppendError::Store(e) => SeedError::Store(e),
+                    AppendError::Conflict(_) => {
+                        unreachable!("no version check on inject_concurrent_event")
+                    }
+                })
+        }
     }
 
     /// Inject a raw event without codec processing.
@@ -254,20 +262,25 @@ pub trait RepositoryTestExt: StoreAccess {
         aggregate_kind: &str,
         id: &<Self::Store as EventStore>::Id,
         event: PersistableEvent<<Self::Store as EventStore>::Metadata>,
-    ) -> Result<(), <Self::Store as EventStore>::Error> {
-        let store = self.store_mut();
-        store
-            .append(aggregate_kind, id, None, vec![event])
-            .map_err(|e| match e {
-                AppendError::Store(e) => e,
-                AppendError::Conflict(_) => {
-                    unreachable!("no version check on inject_raw_event")
-                }
-            })
+    ) -> impl Future<Output = Result<(), <Self::Store as EventStore>::Error>> + Send + '_ {
+        let aggregate_kind = aggregate_kind.to_string();
+        let id = id.clone();
+        async move {
+            let store = self.store_mut();
+            store
+                .append(&aggregate_kind, &id, None, vec![event])
+                .await
+                .map_err(|e| match e {
+                    AppendError::Store(e) => e,
+                    AppendError::Conflict(_) => {
+                        unreachable!("no version check on inject_raw_event")
+                    }
+                })
+        }
     }
 }
 
-impl<T> RepositoryTestExt for T where T: StoreAccess {}
+impl<T> RepositoryTestExt for T where T: StoreAccess + Send {}
 
 // =============================================================================
 // Test Framework for Aggregate Unit Testing
@@ -716,8 +729,8 @@ mod repository_test_ext_tests {
         }
     }
 
-    #[test]
-    fn seed_events_appends_typed_events() {
+    #[tokio::test]
+    async fn seed_events_appends_typed_events() {
         let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
         let mut repo = Repository::new(store);
         let id = "s1".to_string();
@@ -729,20 +742,21 @@ mod repository_test_ext_tests {
                 PointsAdded { points: 20 }.into(),
             ],
         )
+        .await
         .unwrap();
 
         assert_eq!(
-            repo.store().stream_version(Score::KIND, &id).unwrap(),
+            repo.store().stream_version(Score::KIND, &id).await.unwrap(),
             Some(1)
         );
 
         // Verify events are loadable
-        let loaded: Score = repo.aggregate_builder().load(&id).unwrap();
+        let loaded: Score = repo.aggregate_builder().load(&id).await.unwrap();
         assert_eq!(loaded.total, 30);
     }
 
-    #[test]
-    fn inject_concurrent_event_appends_single_event() {
+    #[tokio::test]
+    async fn inject_concurrent_event_appends_single_event() {
         let event_store: InMemoryEventStore<String, JsonCodec, ()> =
             InMemoryEventStore::new(JsonCodec);
         let mut repo = Repository::new(event_store);
@@ -750,24 +764,26 @@ mod repository_test_ext_tests {
 
         // Seed initial state
         repo.seed_events::<Score>(&id, vec![PointsAdded { points: 100 }.into()])
+            .await
             .unwrap();
 
         // Inject concurrent event
         repo.inject_concurrent_event::<Score>(&id, PointsAdded { points: 50 }.into())
+            .await
             .unwrap();
 
         assert_eq!(
-            repo.store().stream_version(Score::KIND, &id).unwrap(),
+            repo.store().stream_version(Score::KIND, &id).await.unwrap(),
             Some(1)
         );
 
         // Verify both events are reflected
-        let loaded: Score = repo.aggregate_builder().load(&id).unwrap();
+        let loaded: Score = repo.aggregate_builder().load(&id).await.unwrap();
         assert_eq!(loaded.total, 150);
     }
 
-    #[test]
-    fn inject_raw_event_appends_raw_bytes() {
+    #[tokio::test]
+    async fn inject_raw_event_appends_raw_bytes() {
         let event_store: InMemoryEventStore<String, JsonCodec, ()> =
             InMemoryEventStore::new(JsonCodec);
         let mut repo = Repository::new(event_store);
@@ -782,10 +798,15 @@ mod repository_test_ext_tests {
                 metadata: (),
             },
         )
+        .await
         .unwrap();
 
         // Verify event is loadable
-        let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();
+        let loaded: Score = repo
+            .aggregate_builder()
+            .load(&"s1".to_string())
+            .await
+            .unwrap();
         assert_eq!(loaded.total, 42);
     }
 }

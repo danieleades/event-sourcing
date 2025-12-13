@@ -440,7 +440,8 @@ impl ApplyProjection<InvoiceSettled> for CustomerBillingProjection {
 // =============================================================================
 
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store: InMemoryEventStore<String, JsonCodec, EventMetadata> =
         InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
@@ -449,59 +450,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscription_corr = format!("subscription/{}", customer_id.as_str());
 
     // Activate the subscription
-    repository.execute_command::<Subscription, StartSubscription>(
-        &customer_id,
-        &StartSubscription {
-            plan_name: "Pro Annual".into(),
-            activated_at: "2024-10-01".into(),
-        },
-        &EventMetadata {
-            correlation_id: subscription_corr.clone(),
-            user_id: "crm-system".to_owned(),
-        },
-    )?;
+    repository
+        .execute_command::<Subscription, StartSubscription>(
+            &customer_id,
+            &StartSubscription {
+                plan_name: "Pro Annual".into(),
+                activated_at: "2024-10-01".into(),
+            },
+            &EventMetadata {
+                correlation_id: subscription_corr.clone(),
+                user_id: "crm-system".to_owned(),
+            },
+        )
+        .await?;
 
     // Issue an invoice tied to the subscription lifecycle
     let invoice_id = InvoiceId::new(customer_id.clone(), "2024-INV-1001");
     let invoice_stream_id = invoice_id.to_string();
     let invoice_corr = format!("invoice/{}", invoice_id.invoice_number);
 
-    repository.execute_command::<Invoice, IssueInvoice>(
-        &invoice_stream_id,
-        &IssueInvoice {
-            customer_id: customer_id.clone(),
-            amount_cents: 12_000,
-            due_date: "2024-11-01".into(),
-        },
-        &EventMetadata {
-            correlation_id: invoice_corr.clone(),
-            user_id: "billing-engine".to_owned(),
-        },
-    )?;
+    repository
+        .execute_command::<Invoice, IssueInvoice>(
+            &invoice_stream_id,
+            &IssueInvoice {
+                customer_id: customer_id.clone(),
+                amount_cents: 12_000,
+                due_date: "2024-11-01".into(),
+            },
+            &EventMetadata {
+                correlation_id: invoice_corr.clone(),
+                user_id: "billing-engine".to_owned(),
+            },
+        )
+        .await?;
 
     // Record a partial payment
-    repository.execute_command::<Invoice, RecordPayment>(
-        &invoice_stream_id,
-        &RecordPayment {
-            amount_cents: 5_000,
-        },
-        &EventMetadata {
-            correlation_id: invoice_corr.clone(),
-            user_id: "payments-service".to_owned(),
-        },
-    )?;
+    repository
+        .execute_command::<Invoice, RecordPayment>(
+            &invoice_stream_id,
+            &RecordPayment {
+                amount_cents: 5_000,
+            },
+            &EventMetadata {
+                correlation_id: invoice_corr.clone(),
+                user_id: "payments-service".to_owned(),
+            },
+        )
+        .await?;
 
     // Record remaining balance
-    repository.execute_command::<Invoice, RecordPayment>(
-        &invoice_stream_id,
-        &RecordPayment {
-            amount_cents: 7_000,
-        },
-        &EventMetadata {
-            correlation_id: invoice_corr,
-            user_id: "payments-service".to_owned(),
-        },
-    )?;
+    repository
+        .execute_command::<Invoice, RecordPayment>(
+            &invoice_stream_id,
+            &RecordPayment {
+                amount_cents: 7_000,
+            },
+            &EventMetadata {
+                correlation_id: invoice_corr,
+                user_id: "payments-service".to_owned(),
+            },
+        )
+        .await?;
 
     // Build the read model (would typically happen asynchronously)
     let billing_projection = repository
@@ -511,24 +520,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .event::<InvoiceIssued>()
         .event::<PaymentRecorded>()
         .event::<InvoiceSettled>()
-        .load()?;
+        .load()
+        .await?;
 
     // Guard cancelling the subscription with the up-to-date read model
     if billing_projection
         .customer(&customer_id)
         .is_some_and(|snapshot| snapshot.outstanding_balance_cents == 0)
     {
-        repository.execute_command::<Subscription, CancelSubscription>(
-            &customer_id,
-            &CancelSubscription {
-                reason: "customer requested cancellation".into(),
-                cancelled_at: "2024-12-31".into(),
-            },
-            &EventMetadata {
-                correlation_id: subscription_corr,
-                user_id: "crm-system".to_owned(),
-            },
-        )?;
+        repository
+            .execute_command::<Subscription, CancelSubscription>(
+                &customer_id,
+                &CancelSubscription {
+                    reason: "customer requested cancellation".into(),
+                    cancelled_at: "2024-12-31".into(),
+                },
+                &EventMetadata {
+                    correlation_id: subscription_corr,
+                    user_id: "crm-system".to_owned(),
+                },
+            )
+            .await?;
     } else {
         println!("Subscription not cancelled – outstanding balance detected.");
     }
@@ -540,7 +552,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .event::<InvoiceIssued>()
         .event::<PaymentRecorded>()
         .event::<InvoiceSettled>()
-        .load()?;
+        .load()
+        .await?;
 
     println!("=== Customer Billing Dashboard ===");
     for (customer, snapshot) in final_projection.customers() {

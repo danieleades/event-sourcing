@@ -46,7 +46,8 @@ repository.execute_command::<Account, Deposit>(
     &account_id,
     &Deposit { amount: 100 },
     &metadata,
-)?;
+)
+.await?;
 ```
 
 Each event produced by the command receives this metadata.
@@ -127,7 +128,9 @@ If you don't need metadata, use `()`:
 ```rust,ignore
 let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
 
-repository.execute_command::<Account, Deposit>(&id, &cmd, &())?;
+repository
+    .execute_command::<Account, Deposit>(&id, &cmd, &())
+    .await?;
 ```
 
 Projections with `type Metadata = ()` ignore the metadata parameter.

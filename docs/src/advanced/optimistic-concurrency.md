@@ -46,7 +46,10 @@ loading and committing:
 ```rust,ignore
 use event_sourcing::OptimisticCommandError;
 
-match repo.execute_command::<MyAggregate, MyCommand>(&id, &command, &metadata) {
+match repo
+    .execute_command::<MyAggregate, MyCommand>(&id, &command, &metadata)
+    .await
+{
     Ok(()) => println!("Success!"),
     Err(OptimisticCommandError::Concurrency(conflict)) => {
         println!(
@@ -69,9 +72,7 @@ The repository provides a helper for this: `execute_with_retry`.
 use event_sourcing::RetryResult;
 
 let attempts: RetryResult<MyAggregate, MyStore> =
-    repo.execute_with_retry::<MyAggregate, MyCommand>(&id, &command, &metadata, 3);
-
-let attempts = attempts?;
+    repo.execute_with_retry::<MyAggregate, MyCommand>(&id, &command, &metadata, 3).await?;
 println!("Succeeded after {attempts} attempt(s)");
 ```
 

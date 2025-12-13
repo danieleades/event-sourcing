@@ -134,11 +134,9 @@ Commands are **imperative** because they request an action:
 Use the repository to execute commands:
 
 ```rust,ignore
-repository.execute_command::<Account, Deposit>(
-    &account_id,
-    &Deposit { amount: 100 },
-    &metadata,
-)?;
+repository
+    .execute_command::<Account, Deposit>(&account_id, &Deposit { amount: 100 }, &metadata)
+    .await?;
 ```
 
 The repository:

@@ -1,8 +1,8 @@
 #![cfg(feature = "test-util")]
 
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
 use event_sourcing::snapshot::{Snapshot, SnapshotStore};
@@ -161,8 +161,8 @@ fn concurrency_conflict_formats_unexpected_empty_state() {
     assert!(msg.contains("unexpected empty state"));
 }
 
-#[test]
-fn in_memory_snapshot_store_policy_always_saves() {
+#[tokio::test]
+async fn in_memory_snapshot_store_policy_always_saves() {
     let mut snapshots = InMemorySnapshotStore::<String, u64>::always();
     let id = "c1".to_string();
 
@@ -178,19 +178,20 @@ fn in_memory_snapshot_store_policy_always_saves() {
             },
             0,
         )
+        .await
         .unwrap();
 
-    let loaded = snapshots.load(Counter::KIND, &id).unwrap();
+    let loaded = snapshots.load(Counter::KIND, &id).await.unwrap();
     assert!(loaded.is_some());
 }
 
-#[test]
-fn in_memory_snapshot_store_policy_every_n_events_saves_at_threshold() {
+#[tokio::test]
+async fn in_memory_snapshot_store_policy_every_n_events_saves_at_threshold() {
     let mut snapshots = InMemorySnapshotStore::<String, u64>::every(3);
     let id = "c1".to_string();
 
     assert!(!snapshots.should_snapshot(Counter::KIND, &id, 2));
-    assert!(snapshots.load(Counter::KIND, &id).unwrap().is_none());
+    assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_none());
 
     assert!(snapshots.should_snapshot(Counter::KIND, &id, 3));
     snapshots
@@ -203,42 +204,46 @@ fn in_memory_snapshot_store_policy_every_n_events_saves_at_threshold() {
             },
             3,
         )
+        .await
         .unwrap();
-    assert!(snapshots.load(Counter::KIND, &id).unwrap().is_some());
+    assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_some());
 }
 
-#[test]
-fn in_memory_snapshot_store_policy_never_does_not_save() {
+#[tokio::test]
+async fn in_memory_snapshot_store_policy_never_does_not_save() {
     let snapshots = InMemorySnapshotStore::<String, u64>::never();
     let id = "c1".to_string();
 
     assert!(!snapshots.should_snapshot(Counter::KIND, &id, 100));
 
-    assert!(snapshots.load(Counter::KIND, &id).unwrap().is_none());
+    assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_none());
 }
 
-#[test]
-fn projection_event_for_filters_by_aggregate() {
+#[tokio::test]
+async fn projection_event_for_filters_by_aggregate() {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     repo.execute_command::<Counter, AddValue>(&"c1".to_string(), &AddValue { amount: 10 }, &())
+        .await
         .unwrap();
     repo.execute_command::<Counter, AddValue>(&"c2".to_string(), &AddValue { amount: 20 }, &())
+        .await
         .unwrap();
 
     let projection: TotalsProjection = repo
         .build_projection()
         .event_for::<Counter, ValueAdded>(&"c1".to_string())
         .load()
+        .await
         .unwrap();
 
     assert_eq!(projection.totals.get("c1"), Some(&10));
     assert!(!projection.totals.contains_key("c2"));
 }
 
-#[test]
-fn projection_load_surfaces_codec_error_with_event_kind() {
+#[tokio::test]
+async fn projection_load_surfaces_codec_error_with_event_kind() {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repo = Repository::new(store);
 
@@ -251,12 +256,14 @@ fn projection_load_surfaces_codec_error_with_event_kind() {
             metadata: (),
         },
     )
+    .await
     .unwrap();
 
     let err = repo
         .build_projection::<TotalsProjection>()
         .event::<ValueAdded>()
         .load()
+        .await
         .unwrap_err();
 
     match err {
@@ -265,8 +272,8 @@ fn projection_load_surfaces_codec_error_with_event_kind() {
     }
 }
 
-#[test]
-fn unchecked_repository_saves_snapshot_and_exposes_snapshot_store() {
+#[tokio::test]
+async fn unchecked_repository_saves_snapshot_and_exposes_snapshot_store() {
     let store = InMemoryEventStore::new(JsonCodec);
     let snapshots = InMemorySnapshotStore::always();
     let mut repo = Repository::new(store)
@@ -275,14 +282,19 @@ fn unchecked_repository_saves_snapshot_and_exposes_snapshot_store() {
 
     let id = "c1".to_string();
     repo.execute_command::<Counter, AddValue>(&id, &AddValue { amount: 5 }, &())
+        .await
         .unwrap();
 
-    let loaded = repo.snapshot_store().load(Counter::KIND, &id).unwrap();
+    let loaded = repo
+        .snapshot_store()
+        .load(Counter::KIND, &id)
+        .await
+        .unwrap();
     assert!(loaded.is_some());
 }
 
-#[test]
-fn unchecked_execute_command_with_no_events_does_not_persist_or_snapshot() {
+#[tokio::test]
+async fn unchecked_execute_command_with_no_events_does_not_persist_or_snapshot() {
     let store = InMemoryEventStore::new(JsonCodec);
     let snapshots = InMemorySnapshotStore::always();
     let mut repo = Repository::new(store)
@@ -291,17 +303,20 @@ fn unchecked_execute_command_with_no_events_does_not_persist_or_snapshot() {
 
     let id = "c1".to_string();
     repo.execute_command::<Counter, NoOp>(&id, &NoOp, &())
+        .await
         .unwrap();
 
     assert!(
         repo.event_store()
             .stream_version(Counter::KIND, &id)
+            .await
             .unwrap()
             .is_none()
     );
     assert!(
         repo.snapshot_store()
             .load(Counter::KIND, &id)
+            .await
             .unwrap()
             .is_none()
     );
@@ -319,8 +334,14 @@ impl SnapshotStore for FailingLoadSnapshotStore {
     type Position = u64;
     type Error = SnapshotLoadError;
 
-    fn load(&self, _: &str, _: &Self::Id) -> Result<Option<Snapshot<Self::Position>>, Self::Error> {
-        Err(SnapshotLoadError)
+    fn load(
+        &self,
+        _: &str,
+        _: &Self::Id,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
+    + Send
+    + '_ {
+        std::future::ready(Err(SnapshotLoadError))
     }
 
     fn offer_snapshot(
@@ -329,8 +350,8 @@ impl SnapshotStore for FailingLoadSnapshotStore {
         _: &Self::Id,
         _: Snapshot<Self::Position>,
         _: u64,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + '_ {
+        std::future::ready(Ok(()))
     }
 
     fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
@@ -338,8 +359,8 @@ impl SnapshotStore for FailingLoadSnapshotStore {
     }
 }
 
-#[test]
-fn snapshot_load_failure_falls_back_to_full_replay() {
+#[tokio::test]
+async fn snapshot_load_failure_falls_back_to_full_replay() {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repo = Repository::new(store)
         .with_snapshots(FailingLoadSnapshotStore)
@@ -347,9 +368,11 @@ fn snapshot_load_failure_falls_back_to_full_replay() {
 
     let id = "c1".to_string();
     repo.execute_command::<Counter, AddValue>(&id, &AddValue { amount: 10 }, &())
+        .await
         .unwrap();
 
     repo.execute_command::<Counter, RequireAtLeast>(&id, &RequireAtLeast { min: 5 }, &())
+        .await
         .unwrap();
 }
 
@@ -361,11 +384,17 @@ impl SnapshotStore for CorruptSnapshotStore {
     type Position = u64;
     type Error = SnapshotLoadError;
 
-    fn load(&self, _: &str, _: &Self::Id) -> Result<Option<Snapshot<Self::Position>>, Self::Error> {
-        Ok(Some(Snapshot {
+    fn load(
+        &self,
+        _: &str,
+        _: &Self::Id,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
+    + Send
+    + '_ {
+        std::future::ready(Ok(Some(Snapshot {
             position: 0,
             data: b"not-json".to_vec(),
-        }))
+        })))
     }
 
     fn offer_snapshot(
@@ -374,8 +403,8 @@ impl SnapshotStore for CorruptSnapshotStore {
         _: &Self::Id,
         _: Snapshot<Self::Position>,
         _: u64,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + '_ {
+        std::future::ready(Ok(()))
     }
 
     fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
@@ -383,8 +412,8 @@ impl SnapshotStore for CorruptSnapshotStore {
     }
 }
 
-#[test]
-fn corrupt_snapshot_data_returns_projection_error() {
+#[tokio::test]
+async fn corrupt_snapshot_data_returns_projection_error() {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repo = Repository::new(store)
         .with_snapshots(CorruptSnapshotStore)
@@ -392,30 +421,33 @@ fn corrupt_snapshot_data_returns_projection_error() {
 
     let err = repo
         .execute_command::<Counter, AddValue>(&"c1".to_string(), &AddValue { amount: 1 }, &())
+        .await
         .unwrap_err();
 
     assert!(matches!(err, SnapshotCommandError::Projection(_)));
 }
 
-#[test]
-fn execute_with_retry_with_zero_retries_still_attempts_once() {
+#[tokio::test]
+async fn execute_with_retry_with_zero_retries_still_attempts_once() {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     let attempts = repo
         .execute_with_retry::<Counter, AddValue>(&"c1".to_string(), &AddValue { amount: 1 }, &(), 0)
+        .await
         .unwrap();
 
     assert_eq!(attempts, 1);
 }
 
-#[test]
-fn optimistic_execute_with_retry_surfaces_non_concurrency_errors() {
+#[tokio::test]
+async fn optimistic_execute_with_retry_surfaces_non_concurrency_errors() {
     let store = InMemoryEventStore::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     let err = repo
         .execute_with_retry::<Counter, AddValue>(&"c1".to_string(), &AddValue { amount: 0 }, &(), 3)
+        .await
         .unwrap_err();
 
     assert!(matches!(err, OptimisticCommandError::Aggregate(_)));
@@ -423,18 +455,18 @@ fn optimistic_execute_with_retry_surfaces_non_concurrency_errors() {
 
 #[derive(Debug)]
 struct TrackingSnapshotStore {
-    load_called: Cell<bool>,
+    load_called: AtomicBool,
 }
 
 impl TrackingSnapshotStore {
     const fn new() -> Self {
         Self {
-            load_called: Cell::new(false),
+            load_called: AtomicBool::new(false),
         }
     }
 
-    const fn load_called(&self) -> bool {
-        self.load_called.get()
+    fn load_called(&self) -> bool {
+        self.load_called.load(Ordering::Relaxed)
     }
 }
 
@@ -443,9 +475,15 @@ impl SnapshotStore for TrackingSnapshotStore {
     type Position = u64;
     type Error = Infallible;
 
-    fn load(&self, _: &str, _: &Self::Id) -> Result<Option<Snapshot<Self::Position>>, Self::Error> {
-        self.load_called.set(true);
-        Ok(None)
+    fn load(
+        &self,
+        _: &str,
+        _: &Self::Id,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
+    + Send
+    + '_ {
+        self.load_called.store(true, Ordering::Relaxed);
+        std::future::ready(Ok(None))
     }
 
     fn offer_snapshot(
@@ -454,8 +492,8 @@ impl SnapshotStore for TrackingSnapshotStore {
         _: &Self::Id,
         _: Snapshot<Self::Position>,
         _: u64,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + '_ {
+        std::future::ready(Ok(()))
     }
 
     fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
@@ -463,13 +501,17 @@ impl SnapshotStore for TrackingSnapshotStore {
     }
 }
 
-#[test]
-fn aggregate_builder_load_consults_snapshot_store() {
+#[tokio::test]
+async fn aggregate_builder_load_consults_snapshot_store() {
     let store = InMemoryEventStore::<String, _, ()>::new(JsonCodec);
     let snapshots = TrackingSnapshotStore::new();
     let repo = Repository::new(store).with_snapshots(snapshots);
 
-    let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();
+    let counter: Counter = repo
+        .aggregate_builder()
+        .load(&"c1".to_string())
+        .await
+        .unwrap();
 
     assert_eq!(counter.value, 0);
     assert!(repo.snapshot_store().load_called());

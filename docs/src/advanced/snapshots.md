@@ -75,16 +75,18 @@ Use for: Read-only replicas, debugging.
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-pub trait SnapshotStore {
-    type Id;
-    type Position;
+pub trait SnapshotStore: Send + Sync {
+    type Id: Send + Sync + 'static;
+    type Position: Send + Sync + 'static;
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn load(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
+    fn load<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
+           + Send
+           + 'a;
 
     fn should_snapshot(
         &self,
@@ -93,13 +95,13 @@ pub trait SnapshotStore {
         events_since_last_snapshot: u64,
     ) -> bool;
 
-    fn offer_snapshot(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn offer_snapshot<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         snapshot: Snapshot<Self::Position>,
         events_since_last_snapshot: u64,
-    ) -> Result<(), Self::Error>;
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'a;
 }
 ```
 
@@ -136,28 +138,33 @@ impl SnapshotStore for PostgresSnapshotStore {
     type Id = String;
     type Position = u64;
 
-    fn load(&self, kind: &str, id: &String)
-        -> Result<Option<Snapshot<u64>>, Self::Error>
-    {
+    fn load<'a>(
+        &'a self,
+        kind: &'a str,
+        id: &'a String,
+    ) -> impl std::future::Future<Output = Result<Option<Snapshot<u64>>, Self::Error>>
+           + Send
+           + 'a {
         // SELECT aggregate_data, position
         // FROM snapshots
         // WHERE aggregate_kind = $1 AND aggregate_id = $2
+        async move { todo!() }
     }
 
     fn should_snapshot(&self, _kind: &str, _id: &String, events_since: u64) -> bool {
         events_since >= 100
     }
 
-    fn offer_snapshot(
-        &mut self,
-        kind: &str,
-        id: &String,
+    fn offer_snapshot<'a>(
+        &'a mut self,
+        kind: &'a str,
+        id: &'a String,
         snapshot: Snapshot<u64>,
         events_since: u64,
-    ) -> Result<(), Self::Error> {
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'a {
         debug_assert!(self.should_snapshot(kind, id, events_since));
         // INSERT INTO snapshots (kind, id, position, data) VALUES (...)
-        Ok(())
+        async move { Ok(()) }
     }
 }
 ```

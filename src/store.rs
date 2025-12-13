@@ -6,6 +6,7 @@
 //! concerns together.
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::future::Future;
 use std::marker::PhantomData;
 
 use thiserror::Error;
@@ -199,7 +200,7 @@ impl<S: EventStore> Transaction<'_, S, Unchecked> {
     /// # Errors
     ///
     /// Returns a store error if persistence fails.
-    pub fn commit(mut self) -> Result<(), S::Error> {
+    pub async fn commit(mut self) -> Result<(), S::Error> {
         let events = std::mem::take(&mut self.events);
         let event_count = events.len();
         tracing::debug!(
@@ -210,6 +211,7 @@ impl<S: EventStore> Transaction<'_, S, Unchecked> {
         self.committed = true;
         self.store
             .append(&self.aggregate_kind, &self.aggregate_id, None, events)
+            .await
             .map_err(|e| match e {
                 AppendError::Store(e) => e,
                 AppendError::Conflict(_) => unreachable!("conflict impossible without version"),
@@ -231,7 +233,7 @@ impl<S: EventStore> Transaction<'_, S, Optimistic> {
     ///
     /// Returns [`AppendError::Conflict`] if another writer modified the stream,
     /// or [`AppendError::Store`] if persistence fails.
-    pub fn commit(mut self) -> Result<(), AppendError<S::Position, S::Error>> {
+    pub async fn commit(mut self) -> Result<(), AppendError<S::Position, S::Error>> {
         let events = std::mem::take(&mut self.events);
         let event_count = events.len();
         tracing::debug!(
@@ -245,17 +247,20 @@ impl<S: EventStore> Transaction<'_, S, Optimistic> {
         match self.expected_version {
             Some(version) => {
                 // Expected specific version - delegate to store's version checking
-                self.store.append(
-                    &self.aggregate_kind,
-                    &self.aggregate_id,
-                    Some(version),
-                    events,
-                )
+                self.store
+                    .append(
+                        &self.aggregate_kind,
+                        &self.aggregate_id,
+                        Some(version),
+                        events,
+                    )
+                    .await
             }
             None => {
                 // Expected new stream - verify stream is actually empty
                 self.store
                     .append_expecting_new(&self.aggregate_kind, &self.aggregate_id, events)
+                    .await
             }
         }
     }
@@ -284,27 +289,27 @@ impl<S: EventStore, C: ConcurrencyStrategy> Drop for Transaction<'_, S, C> {
 /// - `Metadata`: Infrastructure metadata type (timestamps, causation tracking, etc.)
 /// - `Codec`: Serialization strategy for domain events
 // ANCHOR: event_store_trait
-pub trait EventStore {
+pub trait EventStore: Send + Sync {
     /// Aggregate identifier type.
     ///
     /// This type must be clonable so repositories can reuse IDs across calls.
     /// Common choices: `String`, `Uuid`, or custom ID types.
-    type Id: Clone;
+    type Id: Clone + Send + Sync + 'static;
 
     /// Position type used for ordering events and version checking.
     ///
     /// Must be `Copy + PartialEq` to support optimistic concurrency.
     /// Use `()` if ordering is not needed.
-    type Position: Copy + PartialEq + std::fmt::Debug;
+    type Position: Copy + PartialEq + std::fmt::Debug + Send + Sync + 'static;
 
     /// Store-specific error type.
-    type Error: std::error::Error;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// Serialization codec.
-    type Codec: Codec;
+    type Codec: Codec + Clone + Send + Sync + 'static;
 
     /// Metadata type for infrastructure concerns.
-    type Metadata;
+    type Metadata: Send + Sync + 'static;
 
     fn codec(&self) -> &Self::Codec;
 
@@ -315,11 +320,11 @@ pub trait EventStore {
     /// # Errors
     ///
     /// Returns a store-specific error when the operation fails.
-    fn stream_version(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Self::Position>, Self::Error>;
+    fn stream_version<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl Future<Output = Result<Option<Self::Position>, Self::Error>> + Send + 'a;
 
     /// Begin a transaction for appending events to an aggregate.
     ///
@@ -348,13 +353,13 @@ pub trait EventStore {
     ///
     /// Returns [`AppendError::Conflict`] if the version doesn't match, or
     /// [`AppendError::Store`] if persistence fails.
-    fn append(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn append<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         expected_version: Option<Self::Position>,
         events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<Self::Position, Self::Error>>;
+    ) -> impl Future<Output = Result<(), AppendError<Self::Position, Self::Error>>> + Send + 'a;
 
     /// Load events matching the specified filters.
     ///
@@ -368,10 +373,13 @@ pub trait EventStore {
     /// # Errors
     ///
     /// Returns a store-specific error when loading fails.
-    fn load_events(
-        &self,
-        filters: &[EventFilter<Self::Id, Self::Position>],
-    ) -> LoadEventsResult<Self::Id, Self::Position, Self::Metadata, Self::Error>;
+    fn load_events<'a>(
+        &'a self,
+        filters: &'a [EventFilter<Self::Id, Self::Position>],
+    ) -> impl Future<
+        Output = LoadEventsResult<Self::Id, Self::Position, Self::Metadata, Self::Error>,
+    > + Send
+    + 'a;
 
     /// Append events expecting an empty stream.
     ///
@@ -382,12 +390,12 @@ pub trait EventStore {
     ///
     /// Returns [`AppendError::Conflict`] if the stream is not empty,
     /// or [`AppendError::Store`] if persistence fails.
-    fn append_expecting_new(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn append_expecting_new<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<Self::Position, Self::Error>>;
+    ) -> impl Future<Output = Result<(), AppendError<Self::Position, Self::Error>>> + Send + 'a;
 }
 // ANCHOR_END: event_store_trait
 
@@ -439,9 +447,9 @@ impl From<Infallible> for InMemoryError {
 
 impl<Id, C, M> EventStore for InMemoryEventStore<Id, C, M>
 where
-    Id: Clone + Eq + std::hash::Hash,
-    C: Codec,
-    M: Clone,
+    Id: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+    C: Codec + Clone + Send + Sync + 'static,
+    M: Clone + Send + Sync + 'static,
 {
     type Id = Id;
     type Position = u64; // Global sequence for chronological ordering
@@ -454,18 +462,18 @@ where
     }
 
     #[tracing::instrument(skip(self, aggregate_id))]
-    fn stream_version(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<u64>, Self::Error> {
+    fn stream_version<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl Future<Output = Result<Option<u64>, Self::Error>> + Send + 'a {
         let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         let version = self
             .streams
             .get(&stream_key)
             .and_then(|s| s.last().map(|e| e.position));
         tracing::trace!(?version, "retrieved stream version");
-        Ok(version)
+        std::future::ready(Ok(version))
     }
 
     fn begin<Conc: ConcurrencyStrategy>(
@@ -483,110 +491,122 @@ where
     }
 
     #[tracing::instrument(skip(self, aggregate_id, events), fields(event_count = events.len()))]
-    fn append(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn append<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         expected_version: Option<u64>,
         events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<u64, Self::Error>> {
+    ) -> impl Future<Output = Result<(), AppendError<u64, Self::Error>>> + Send + 'a {
         let event_count = events.len();
 
-        // Check version if provided
-        if let Some(expected) = expected_version {
-            let current = self
-                .stream_version(aggregate_kind, aggregate_id)
-                .map_err(AppendError::store)?;
-            if current != Some(expected) {
-                tracing::debug!(?expected, ?current, "version mismatch, rejecting append");
-                return Err(ConcurrencyConflict {
-                    expected: Some(expected),
-                    actual: current,
+        let result = (|| {
+            // Check version if provided
+            if let Some(expected) = expected_version {
+                let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
+                let current = self
+                    .streams
+                    .get(&stream_key)
+                    .and_then(|s| s.last().map(|e| e.position));
+                if current != Some(expected) {
+                    tracing::debug!(?expected, ?current, "version mismatch, rejecting append");
+                    return Err(ConcurrencyConflict {
+                        expected: Some(expected),
+                        actual: current,
+                    }
+                    .into());
                 }
-                .into());
             }
-        }
 
-        let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-        let stored: Vec<StoredEvent<Id, u64, M>> = events
-            .into_iter()
-            .map(|e| {
-                let position = self.next_position;
-                self.next_position += 1;
-                StoredEvent {
-                    aggregate_kind: aggregate_kind.to_string(),
-                    aggregate_id: aggregate_id.clone(),
-                    kind: e.kind,
-                    position,
-                    data: e.data,
-                    metadata: e.metadata,
-                }
-            })
-            .collect();
+            let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
+            let stored: Vec<StoredEvent<Id, u64, M>> = events
+                .into_iter()
+                .map(|e| {
+                    let position = self.next_position;
+                    self.next_position += 1;
+                    StoredEvent {
+                        aggregate_kind: aggregate_kind.to_string(),
+                        aggregate_id: aggregate_id.clone(),
+                        kind: e.kind,
+                        position,
+                        data: e.data,
+                        metadata: e.metadata,
+                    }
+                })
+                .collect();
 
-        self.streams.entry(stream_key).or_default().extend(stored);
-        tracing::debug!(events_appended = event_count, "events appended to stream");
-        Ok(())
+            self.streams.entry(stream_key).or_default().extend(stored);
+            tracing::debug!(events_appended = event_count, "events appended to stream");
+            Ok(())
+        })();
+
+        std::future::ready(result)
     }
 
     #[tracing::instrument(skip(self, aggregate_id, events), fields(event_count = events.len()))]
-    fn append_expecting_new(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn append_expecting_new<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<u64, Self::Error>> {
+    ) -> impl Future<Output = Result<(), AppendError<u64, Self::Error>>> + Send + 'a {
         let event_count = events.len();
 
-        // Check that stream is empty (new aggregate)
-        let current = self
-            .stream_version(aggregate_kind, aggregate_id)
-            .map_err(AppendError::store)?;
+        let result = (|| {
+            // Check that stream is empty (new aggregate)
+            let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
+            let current = self
+                .streams
+                .get(&stream_key)
+                .and_then(|s| s.last().map(|e| e.position));
 
-        if let Some(actual) = current {
-            // Stream already has events - conflict!
-            tracing::debug!(
-                ?actual,
-                "stream already exists, rejecting new aggregate append"
-            );
-            return Err(ConcurrencyConflict {
-                expected: None, // "expected new stream"
-                actual: Some(actual),
-            }
-            .into());
-        }
-
-        // Stream is empty, proceed with append (no further version check needed)
-        let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-        let stored: Vec<StoredEvent<Id, u64, M>> = events
-            .into_iter()
-            .map(|e| {
-                let position = self.next_position;
-                self.next_position += 1;
-                StoredEvent {
-                    aggregate_kind: aggregate_kind.to_string(),
-                    aggregate_id: aggregate_id.clone(),
-                    kind: e.kind,
-                    position,
-                    data: e.data,
-                    metadata: e.metadata,
+            if let Some(actual) = current {
+                // Stream already has events - conflict!
+                tracing::debug!(
+                    ?actual,
+                    "stream already exists, rejecting new aggregate append"
+                );
+                return Err(ConcurrencyConflict {
+                    expected: None, // "expected new stream"
+                    actual: Some(actual),
                 }
-            })
-            .collect();
+                .into());
+            }
 
-        self.streams.entry(stream_key).or_default().extend(stored);
-        tracing::debug!(
-            events_appended = event_count,
-            "new stream created with events"
-        );
-        Ok(())
+            // Stream is empty, proceed with append (no further version check needed)
+            let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
+            let stored: Vec<StoredEvent<Id, u64, M>> = events
+                .into_iter()
+                .map(|e| {
+                    let position = self.next_position;
+                    self.next_position += 1;
+                    StoredEvent {
+                        aggregate_kind: aggregate_kind.to_string(),
+                        aggregate_id: aggregate_id.clone(),
+                        kind: e.kind,
+                        position,
+                        data: e.data,
+                        metadata: e.metadata,
+                    }
+                })
+                .collect();
+
+            self.streams.entry(stream_key).or_default().extend(stored);
+            tracing::debug!(
+                events_appended = event_count,
+                "new stream created with events"
+            );
+            Ok(())
+        })();
+
+        std::future::ready(result)
     }
 
     #[tracing::instrument(skip(self, filters), fields(filter_count = filters.len()))]
-    fn load_events(
-        &self,
-        filters: &[EventFilter<Self::Id, Self::Position>],
-    ) -> Result<Vec<StoredEvent<Id, u64, M>>, Self::Error> {
+    fn load_events<'a>(
+        &'a self,
+        filters: &'a [EventFilter<Self::Id, Self::Position>],
+    ) -> impl Future<Output = Result<Vec<StoredEvent<Id, u64, M>>, Self::Error>> + Send + 'a {
         use std::collections::HashSet;
 
         let mut result = Vec::new();
@@ -664,11 +684,12 @@ where
         result.sort_by_key(|event| event.position);
 
         tracing::debug!(events_loaded = result.len(), "loaded events from store");
-        Ok(result)
+        std::future::ready(Ok(result))
     }
 }
 
 /// JSON codec backed by `serde_json`.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct JsonCodec;
 
 impl crate::codec::Codec for JsonCodec {

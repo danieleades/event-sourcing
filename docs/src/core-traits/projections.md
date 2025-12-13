@@ -57,7 +57,8 @@ let summary = repository
     .build_projection::<AccountSummary>()
     .event::<FundsDeposited>()     // All deposits across all accounts
     .event::<FundsWithdrawn>()      // All withdrawals across all accounts
-    .load()?;
+    .load()
+    .await?;
 ```
 
 ## Multi-Aggregate Projections
@@ -121,7 +122,8 @@ let report = repository
     .event::<ProductCreated>()   // From Product aggregate
     .event::<ProductRenamed>()   // From Product aggregate
     .event::<SaleRecorded>()     // From Sale aggregate
-    .load()?;
+    .load()
+    .await?;
 ```
 
 ## Filtering by Aggregate
@@ -132,7 +134,8 @@ Use `.events_for()` to load all events for a specific aggregate instance:
 let account_history = repository
     .build_projection::<TransactionHistory>()
     .events_for::<Account>(&account_id)
-    .load()?;
+    .load()
+    .await?;
 ```
 
 ## Using Metadata

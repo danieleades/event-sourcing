@@ -143,7 +143,7 @@ impl Handle<RedeemPoints> for LoyaltyAccount {
 
 type ExampleResult = Result<(), Box<dyn std::error::Error>>;
 
-fn run_repository_without_snapshots() -> ExampleResult {
+async fn run_repository_without_snapshots() -> ExampleResult {
     println!("1. Repository without snapshots (default behavior)");
 
     let event_store = InMemoryEventStore::new(JsonCodec);
@@ -158,10 +158,11 @@ fn run_repository_without_snapshots() -> ExampleResult {
                 reason: format!("Purchase #{i}"),
             },
             &(),
-        )?;
+        )
+        .await?;
     }
 
-    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id)?;
+    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id).await?;
     println!(
         "   Points balance: {} (replayed 10 events)",
         account.points()
@@ -171,7 +172,7 @@ fn run_repository_without_snapshots() -> ExampleResult {
     Ok(())
 }
 
-fn run_always_snapshot_policy() -> ExampleResult {
+async fn run_always_snapshot_policy() -> ExampleResult {
     println!("2. Repository with always-snapshot policy");
 
     let event_store = InMemoryEventStore::new(JsonCodec);
@@ -187,11 +188,12 @@ fn run_always_snapshot_policy() -> ExampleResult {
                 reason: format!("Purchase #{i}"),
             },
             &(),
-        )?;
+        )
+        .await?;
         println!("   After purchase #{i}: snapshot saved");
     }
 
-    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id)?;
+    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id).await?;
     println!(
         "   Final points: {} (loaded from snapshot + 0 events)",
         account.points()
@@ -201,7 +203,7 @@ fn run_always_snapshot_policy() -> ExampleResult {
     Ok(())
 }
 
-fn run_every_n_snapshot_policy() -> ExampleResult {
+async fn run_every_n_snapshot_policy() -> ExampleResult {
     println!("3. Repository with every-5-events policy");
 
     let event_store = InMemoryEventStore::new(JsonCodec);
@@ -217,13 +219,14 @@ fn run_every_n_snapshot_policy() -> ExampleResult {
                 reason: format!("Purchase #{i}"),
             },
             &(),
-        )?;
+        )
+        .await?;
     }
 
     // With 12 events and snapshots every 5:
     // - Snapshot at position ~5 or ~10 (depending on when threshold triggered)
     // - Remaining events replayed
-    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id)?;
+    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id).await?;
     println!(
         "   Points balance: {} (12 events, snapshots every 5)",
         account.points()
@@ -234,7 +237,7 @@ fn run_every_n_snapshot_policy() -> ExampleResult {
     Ok(())
 }
 
-fn run_snapshot_restoration() -> ExampleResult {
+async fn run_snapshot_restoration() -> ExampleResult {
     println!("4. Snapshot restoration after more activity");
 
     let event_store = InMemoryEventStore::new(JsonCodec);
@@ -250,10 +253,11 @@ fn run_snapshot_restoration() -> ExampleResult {
                 reason: format!("Earning #{i}"),
             },
             &(),
-        )?;
+        )
+        .await?;
     }
 
-    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id)?;
+    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id).await?;
     println!("   After 5 earnings: {} points", account.points());
 
     repo.execute_command::<LoyaltyAccount, RedeemPoints>(
@@ -263,9 +267,10 @@ fn run_snapshot_restoration() -> ExampleResult {
             reward: "Free coffee".to_string(),
         },
         &(),
-    )?;
+    )
+    .await?;
 
-    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id)?;
+    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id).await?;
     println!("   After redemption: {} points", account.points());
     println!("   Lifetime earned: {}", account.lifetime_earned());
     println!("   Lifetime redeemed: {}", account.lifetime_redeemed());
@@ -274,7 +279,7 @@ fn run_snapshot_restoration() -> ExampleResult {
     Ok(())
 }
 
-fn run_never_snapshot_policy() -> ExampleResult {
+async fn run_never_snapshot_policy() -> ExampleResult {
     println!("5. Never-snapshot policy (load-only mode)");
 
     let event_store = InMemoryEventStore::new(JsonCodec);
@@ -290,10 +295,11 @@ fn run_never_snapshot_policy() -> ExampleResult {
                 reason: format!("Purchase #{i}"),
             },
             &(),
-        )?;
+        )
+        .await?;
     }
 
-    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id)?;
+    let account: LoyaltyAccount = repo.aggregate_builder().load(&customer_id).await?;
     println!(
         "   Points: {} (full replay, no snapshots saved)",
         account.points()
@@ -303,14 +309,15 @@ fn run_never_snapshot_policy() -> ExampleResult {
     Ok(())
 }
 
-fn main() -> ExampleResult {
+#[tokio::main]
+async fn main() -> ExampleResult {
     println!("=== Snapshotting Example ===\n");
 
-    run_repository_without_snapshots()?;
-    run_always_snapshot_policy()?;
-    run_every_n_snapshot_policy()?;
-    run_snapshot_restoration()?;
-    run_never_snapshot_policy()?;
+    run_repository_without_snapshots().await?;
+    run_always_snapshot_policy().await?;
+    run_every_n_snapshot_policy().await?;
+    run_snapshot_restoration().await?;
+    run_never_snapshot_policy().await?;
 
     println!("=== Summary ===\n");
     println!("✓ Default repository: No snapshotting, full event replay");

@@ -84,12 +84,14 @@ impl<CodecError> From<CodecError> for HandlerError<CodecError> {
 
 type EventHandler<P, S> = Box<
     dyn Fn(
-        &mut P,
-        &<S as EventStore>::Id,
-        &[u8],
-        &<S as EventStore>::Metadata,
-        &<S as EventStore>::Codec,
-    ) -> Result<(), HandlerError<<<S as EventStore>::Codec as Codec>::Error>>,
+            &mut P,
+            &<S as EventStore>::Id,
+            &[u8],
+            &<S as EventStore>::Metadata,
+            &<S as EventStore>::Codec,
+        ) -> Result<(), HandlerError<<<S as EventStore>::Codec as Codec>::Error>>
+        + Send
+        + Sync,
 >;
 
 /// Builder used to configure which events should be loaded for a projection.
@@ -103,7 +105,7 @@ where
     handlers: HashMap<String, EventHandler<P, S>>,
     /// Filters for loading events from the store
     filters: Vec<EventFilter<S::Id, S::Position>>,
-    pub(super) _phantom: PhantomData<P>,
+    pub(super) _phantom: PhantomData<fn() -> P>,
 }
 
 impl<'a, S, P> ProjectionBuilder<'a, S, P>
@@ -277,12 +279,13 @@ where
             handler_count = self.handlers.len()
         )
     )]
-    pub fn load(self) -> Result<P, ProjectionError<S::Error, <S::Codec as Codec>::Error>> {
+    pub async fn load(self) -> Result<P, ProjectionError<S::Error, <S::Codec as Codec>::Error>> {
         tracing::debug!("loading projection");
 
         let events = self
             .store
             .load_events(&self.filters)
+            .await
             .map_err(ProjectionError::Store)?;
         let codec = self.store.codec();
         let mut projection = P::default();

@@ -350,7 +350,8 @@ impl Handle<CancelOrder> for Order {
 // =============================================================================
 
 #[allow(clippy::too_many_lines)]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Versioned Events with Event Sourcing ===\n");
 
     // Use OrderMetadata (versioned) as the metadata type for the store
@@ -403,16 +404,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         client_version: Some("v1.0.0".to_string()),
     };
 
-    repository.execute_command::<Order, PlaceOrder>(
-        &order_id,
-        &PlaceOrder {
-            product_sku: "DOOHICKEY-003".to_string(),
-            quantity: 10,
-            customer_id: "CUST-456".to_string(),
-            delivery_address: "123 Main St, Anytown, USA".to_string(),
-        },
-        &metadata,
-    )?;
+    repository
+        .execute_command::<Order, PlaceOrder>(
+            &order_id,
+            &PlaceOrder {
+                product_sku: "DOOHICKEY-003".to_string(),
+                quantity: 10,
+                customer_id: "CUST-456".to_string(),
+                delivery_address: "123 Main St, Anytown, USA".to_string(),
+            },
+            &metadata,
+        )
+        .await?;
 
     println!("   Order created: {order_id}");
 
@@ -423,7 +426,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             OrderPlaced::KIND,
             Order::KIND,
             order_id.clone(),
-        )])?;
+        )])
+        .await?;
     if let Some(stored_event) = events.first() {
         let json = String::from_utf8_lossy(&stored_event.data);
         println!("   Stored JSON: {json}\n");
@@ -439,13 +443,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================
     println!("\n4. Shipping the order...");
 
-    repository.execute_command::<Order, ShipOrder>(
-        &order_id,
-        &ShipOrder {
-            tracking_number: "TRACK-123456".to_string(),
-        },
-        &metadata,
-    )?;
+    repository
+        .execute_command::<Order, ShipOrder>(
+            &order_id,
+            &ShipOrder {
+                tracking_number: "TRACK-123456".to_string(),
+            },
+            &metadata,
+        )
+        .await?;
 
     println!("   Order shipped with tracking: TRACK-123456");
 
@@ -455,11 +461,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n5. Replaying all events to rebuild aggregate state...");
 
     // Load all event kinds for this aggregate
-    let events = repository.event_store().load_events(&[
-        EventFilter::for_aggregate(OrderPlaced::KIND, Order::KIND, order_id.clone()),
-        EventFilter::for_aggregate(OrderShipped::KIND, Order::KIND, order_id.clone()),
-        EventFilter::for_aggregate(OrderCancelled::KIND, Order::KIND, order_id.clone()),
-    ])?;
+    let events = repository
+        .event_store()
+        .load_events(&[
+            EventFilter::for_aggregate(OrderPlaced::KIND, Order::KIND, order_id.clone()),
+            EventFilter::for_aggregate(OrderShipped::KIND, Order::KIND, order_id.clone()),
+            EventFilter::for_aggregate(OrderCancelled::KIND, Order::KIND, order_id.clone()),
+        ])
+        .await?;
     let codec = repository.event_store().codec();
     let mut order = Order::default();
 

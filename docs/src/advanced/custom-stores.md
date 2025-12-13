@@ -112,13 +112,15 @@ impl EventStore for PostgresEventStore {
         &self.codec
     }
 
-    fn stream_version(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Self::Position>, Self::Error> {
+    fn stream_version<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl std::future::Future<Output = Result<Option<Self::Position>, Self::Error>>
+           + Send
+           + 'a {
         // Query latest stream position/version for (aggregate_kind, aggregate_id)
-        todo!()
+        async move { todo!() }
     }
 
     fn begin<C: ConcurrencyStrategy>(
@@ -135,37 +137,46 @@ impl EventStore for PostgresEventStore {
         Transaction::new(self, aggregate_kind.to_string(), aggregate_id, expected_version)
     }
 
-    fn append(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn append<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         expected_version: Option<Self::Position>,
         events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<Self::Position, Self::Error>> {
+    ) -> impl std::future::Future<
+        Output = Result<(), AppendError<Self::Position, Self::Error>>,
+    > + Send
+           + 'a {
         // Start a DB transaction
         // If expected_version is Some(v), enforce it (unique constraint / SELECT FOR UPDATE)
         // Insert events atomically
         // Map version mismatches to AppendError::Conflict
-        todo!()
+        async move { todo!() }
     }
 
-    fn append_expecting_new(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn append_expecting_new<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<Self::Position, Self::Error>> {
+    ) -> impl std::future::Future<
+        Output = Result<(), AppendError<Self::Position, Self::Error>>,
+    > + Send
+           + 'a {
         // Enforce that the stream has no events, then insert atomically.
-        todo!()
+        async move { todo!() }
     }
 
-    fn load_events(
-        &self,
-        filters: &[EventFilter<Self::Id, Self::Position>],
-    ) -> Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error> {
+    fn load_events<'a>(
+        &'a self,
+        filters: &'a [EventFilter<Self::Id, Self::Position>],
+    ) -> impl std::future::Future<
+        Output = Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error>,
+    > + Send
+           + 'a {
         // Build query from filters
         // Execute and map rows to StoredEvent
-        todo!()
+        async move { todo!() }
     }
 }
 ```

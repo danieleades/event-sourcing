@@ -36,7 +36,9 @@ struct PaymentReceived { /* ... */ }
 
 ```rust,ignore
 // ID is infrastructure
-repository.execute_command::<Account, Deposit>(&account_id, &command, &metadata)?;
+repository
+    .execute_command::<Account, Deposit>(&account_id, &command, &metadata)
+    .await?;
 
 // Event doesn't contain ID
 struct FundsDeposited { amount: i64 }  // No account_id field

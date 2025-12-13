@@ -12,7 +12,7 @@ proc-macro = true
 workspace = true
 
 [dependencies]
-darling = "0.23"
-syn = { version = "2", features = ["full"] }
-quote = "1"
-proc-macro2 = "1"
+darling = { version = "0.23", default-features = false }
+syn = { version = "2", default-features = false, features = ["full", "parsing", "proc-macro"] }
+quote = { version = "1", default-features = false, features = ["proc-macro"] }
+proc-macro2 = { version = "1", default-features = false, features = ["proc-macro"] }
