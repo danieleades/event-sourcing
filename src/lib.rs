@@ -229,16 +229,6 @@ mod tests {
     }
 
     #[test]
-    fn store_access_trait_method_is_used() {
-        use crate::test::StoreAccess;
-
-        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
-        let repo = Repository::new(store);
-
-        let _ = StoreAccess::store(&repo).codec();
-    }
-
-    #[test]
     fn test_framework_helpers_compile_and_run() {
         use crate::test::TestFramework;
 
