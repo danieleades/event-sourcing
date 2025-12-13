@@ -17,11 +17,15 @@ use crate::{
     concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked},
     projection::{Projection, ProjectionBuilder, ProjectionError},
     snapshot::{Snapshot, SnapshotStore},
-    store::{AppendError, EventFilter, EventStore},
+    store::{AppendError, EventFilter, EventStore, StoredEvent},
 };
 
 type LoadError<S> =
     ProjectionError<<S as EventStore>::Error, <<S as EventStore>::Codec as Codec>::Error>;
+
+type CodecError<S> = <<S as EventStore>::Codec as Codec>::Error;
+type SnapshotBytes = (Option<Vec<u8>>, u64);
+type SnapshotBytesResult<S> = Result<SnapshotBytes, CodecError<S>>;
 
 /// Error type for unchecked command execution (no concurrency variant).
 #[derive(Debug, Error)]
@@ -181,6 +185,77 @@ struct LoadedAggregate<A, Pos> {
     events_since_snapshot: u64,
 }
 
+fn aggregate_event_filters<S, E>(
+    aggregate_kind: &str,
+    aggregate_id: &S::Id,
+    after: Option<S::Position>,
+) -> Vec<EventFilter<S::Id, S::Position>>
+where
+    S: EventStore,
+    E: ProjectionEvent,
+{
+    E::EVENT_KINDS
+        .iter()
+        .map(|kind| {
+            let mut filter =
+                EventFilter::for_aggregate(*kind, aggregate_kind, aggregate_id.clone());
+            if let Some(position) = after {
+                filter = filter.after(position);
+            }
+            filter
+        })
+        .collect()
+}
+
+fn apply_stored_events<A, S>(
+    aggregate: &mut A,
+    codec: &S::Codec,
+    events: &[StoredEvent<S::Id, S::Position, S::Metadata>],
+) -> Result<Option<S::Position>, crate::codec::EventDecodeError<<S::Codec as Codec>::Error>>
+where
+    S: EventStore,
+    A: Aggregate<Id = S::Id>,
+    A::Event: ProjectionEvent,
+{
+    let mut last_event_position: Option<S::Position> = None;
+
+    for stored in events {
+        let event = A::Event::from_stored(&stored.kind, &stored.data, codec)?;
+        aggregate.apply(&event);
+        last_event_position = Some(stored.position);
+    }
+
+    Ok(last_event_position)
+}
+
+fn maybe_snapshot_bytes<A, S, SS>(
+    store: &S,
+    snapshots: &SS,
+    aggregate_id: &S::Id,
+    aggregate: &mut A,
+    events_since_snapshot: u64,
+    new_events: &[A::Event],
+) -> SnapshotBytesResult<S>
+where
+    S: EventStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    A: SnapshotableAggregate<Id = S::Id>,
+{
+    let total_events_since_snapshot = events_since_snapshot + new_events.len() as u64;
+
+    if !snapshots.should_snapshot(A::KIND, aggregate_id, total_events_since_snapshot) {
+        return Ok((None, total_events_since_snapshot));
+    }
+
+    for event in new_events {
+        aggregate.apply(event);
+    }
+
+    let codec = store.codec().clone();
+    let bytes = codec.serialize(aggregate)?;
+    Ok((Some(bytes), total_events_since_snapshot))
+}
+
 /// Repository with no snapshot support.
 pub struct Repository<S, C = Optimistic>
 where
@@ -283,10 +358,7 @@ where
         A: Aggregate<Id = S::Id>,
         A::Event: ProjectionEvent,
     {
-        let filters: Vec<EventFilter<S::Id, S::Position>> = A::Event::EVENT_KINDS
-            .iter()
-            .map(|kind| EventFilter::for_aggregate(*kind, A::KIND, id.clone()))
-            .collect();
+        let filters = aggregate_event_filters::<S, A::Event>(A::KIND, id, None);
 
         let events = self
             .store
@@ -296,14 +368,8 @@ where
 
         let codec = self.store.codec();
         let mut aggregate = A::default();
-        let mut version: Option<S::Position> = None;
-
-        for stored in &events {
-            let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
-                .map_err(ProjectionError::EventDecode)?;
-            aggregate.apply(&event);
-            version = Some(stored.position);
-        }
+        let version = apply_stored_events::<A, S>(&mut aggregate, codec, &events)
+            .map_err(ProjectionError::EventDecode)?;
 
         Ok(LoadedAggregate {
             aggregate,
@@ -340,10 +406,8 @@ where
             .await
             .map_err(CommandError::Projection)?;
 
-        let new_events = match Handle::<Cmd>::handle(&aggregate, command) {
-            Ok(events) => events,
-            Err(e) => return Err(CommandError::Aggregate(e)),
-        };
+        let new_events =
+            Handle::<Cmd>::handle(&aggregate, command).map_err(CommandError::Aggregate)?;
 
         if new_events.is_empty() {
             return Ok(());
@@ -391,10 +455,8 @@ where
             .await
             .map_err(OptimisticCommandError::Projection)?;
 
-        let new_events = match Handle::<Cmd>::handle(&aggregate, command) {
-            Ok(events) => events,
-            Err(e) => return Err(OptimisticCommandError::Aggregate(e)),
-        };
+        let new_events = Handle::<Cmd>::handle(&aggregate, command)
+            .map_err(OptimisticCommandError::Aggregate)?;
 
         if new_events.is_empty() {
             return Ok(());
@@ -520,16 +582,18 @@ where
     {
         let codec = self.store.codec();
 
-        let snapshot_result = match self.snapshots.load(A::KIND, id).await {
-            Ok(snapshot) => snapshot,
-            Err(e) => {
+        let snapshot_result = self
+            .snapshots
+            .load(A::KIND, id)
+            .await
+            .inspect_err(|e| {
                 tracing::error!(
                     error = %e,
                     "failed to load snapshot, falling back to full replay"
                 );
-                None
-            }
-        };
+            })
+            .ok()
+            .flatten();
 
         let (mut aggregate, snapshot_position) = if let Some(snapshot) = snapshot_result {
             let restored: A = codec
@@ -540,16 +604,7 @@ where
             (A::default(), None)
         };
 
-        let filters: Vec<EventFilter<S::Id, S::Position>> = A::Event::EVENT_KINDS
-            .iter()
-            .map(|kind| {
-                let mut filter = EventFilter::for_aggregate(*kind, A::KIND, id.clone());
-                if let Some(pos) = snapshot_position {
-                    filter = filter.after(pos);
-                }
-                filter
-            })
-            .collect();
+        let filters = aggregate_event_filters::<S, A::Event>(A::KIND, id, snapshot_position);
 
         let events = self
             .store
@@ -557,13 +612,8 @@ where
             .await
             .map_err(ProjectionError::Store)?;
 
-        let mut last_event_position: Option<S::Position> = None;
-        for stored in &events {
-            let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
-                .map_err(ProjectionError::EventDecode)?;
-            aggregate.apply(&event);
-            last_event_position = Some(stored.position);
-        }
+        let last_event_position = apply_stored_events::<A, S>(&mut aggregate, codec, &events)
+            .map_err(ProjectionError::EventDecode)?;
 
         let version = last_event_position.or(snapshot_position);
 
@@ -613,36 +663,23 @@ where
             .await
             .map_err(SnapshotCommandError::Projection)?;
 
-        let new_events = match Handle::<Cmd>::handle(&aggregate, command) {
-            Ok(events) => events,
-            Err(e) => return Err(SnapshotCommandError::Aggregate(e)),
-        };
+        let new_events =
+            Handle::<Cmd>::handle(&aggregate, command).map_err(SnapshotCommandError::Aggregate)?;
 
-        let events_count = new_events.len();
-        if events_count == 0 {
+        if new_events.is_empty() {
             return Ok(());
         }
 
         let mut aggregate = aggregate;
-        for event in &new_events {
-            aggregate.apply(event);
-        }
-
-        let total_events_since_snapshot = events_since_snapshot + events_count as u64;
-        let should_snapshot =
-            self.snapshots
-                .should_snapshot(A::KIND, id, total_events_since_snapshot);
-
-        let snapshot_bytes = if should_snapshot {
-            let codec = self.store.codec().clone();
-            Some(
-                codec
-                    .serialize(&aggregate)
-                    .map_err(SnapshotCommandError::Codec)?,
-            )
-        } else {
-            None
-        };
+        let (snapshot_bytes, total_events_since_snapshot) = maybe_snapshot_bytes::<A, S, SS>(
+            &self.store,
+            &self.snapshots,
+            id,
+            &mut aggregate,
+            events_since_snapshot,
+            &new_events,
+        )
+        .map_err(SnapshotCommandError::Codec)?;
 
         drop(aggregate);
 
@@ -716,36 +753,23 @@ where
             .await
             .map_err(OptimisticSnapshotCommandError::Projection)?;
 
-        let new_events = match Handle::<Cmd>::handle(&aggregate, command) {
-            Ok(events) => events,
-            Err(e) => return Err(OptimisticSnapshotCommandError::Aggregate(e)),
-        };
+        let new_events = Handle::<Cmd>::handle(&aggregate, command)
+            .map_err(OptimisticSnapshotCommandError::Aggregate)?;
 
-        let events_count = new_events.len();
-        if events_count == 0 {
+        if new_events.is_empty() {
             return Ok(());
         }
 
         let mut aggregate = aggregate;
-        for event in &new_events {
-            aggregate.apply(event);
-        }
-
-        let total_events_since_snapshot = events_since_snapshot + events_count as u64;
-        let should_snapshot =
-            self.snapshots
-                .should_snapshot(A::KIND, id, total_events_since_snapshot);
-
-        let snapshot_bytes = if should_snapshot {
-            let codec = self.store.codec().clone();
-            Some(
-                codec
-                    .serialize(&aggregate)
-                    .map_err(OptimisticSnapshotCommandError::Codec)?,
-            )
-        } else {
-            None
-        };
+        let (snapshot_bytes, total_events_since_snapshot) = maybe_snapshot_bytes::<A, S, SS>(
+            &self.store,
+            &self.snapshots,
+            id,
+            &mut aggregate,
+            events_since_snapshot,
+            &new_events,
+        )
+        .map_err(OptimisticSnapshotCommandError::Codec)?;
 
         drop(aggregate);
 

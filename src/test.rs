@@ -746,7 +746,7 @@ mod repository_test_ext_tests {
         .unwrap();
 
         assert_eq!(
-            repo.store().stream_version(Score::KIND, &id).unwrap(),
+            repo.store().stream_version(Score::KIND, &id).await.unwrap(),
             Some(1)
         );
 
@@ -773,7 +773,7 @@ mod repository_test_ext_tests {
             .unwrap();
 
         assert_eq!(
-            repo.store().stream_version(Score::KIND, &id).unwrap(),
+            repo.store().stream_version(Score::KIND, &id).await.unwrap(),
             Some(1)
         );
 
