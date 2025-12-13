@@ -60,10 +60,11 @@ use std::marker::PhantomData;
 
 use thiserror::Error;
 
+use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyStrategy, Unchecked};
 use crate::snapshot::SnapshotStore;
 use crate::store::{AppendError, EventStore, PersistableEvent};
-use crate::{Aggregate, Codec, Handle, Repository, SerializableEvent};
+use crate::{Aggregate, Handle, Repository};
 
 // =============================================================================
 // Repository Test Extension Trait
@@ -623,7 +624,11 @@ mod tests {
 #[cfg(test)]
 mod repository_test_ext_tests {
     use super::*;
-    use crate::{DomainEvent, InMemoryEventStore, JsonCodec, PersistableEvent, ProjectionEvent};
+    use crate::{
+        DomainEvent, InMemoryEventStore, JsonCodec,
+        codec::{EventDecodeError, ProjectionEvent},
+        store::PersistableEvent,
+    };
 
     // Test fixtures with SerializableEvent implementation
     #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -641,7 +646,7 @@ mod repository_test_ext_tests {
     }
 
     impl SerializableEvent for ScoreEvent {
-        fn to_persistable<C: crate::Codec, M>(
+        fn to_persistable<C: Codec, M>(
             self,
             codec: &C,
             metadata: M,
@@ -659,18 +664,16 @@ mod repository_test_ext_tests {
     impl ProjectionEvent for ScoreEvent {
         const EVENT_KINDS: &'static [&'static str] = &[PointsAdded::KIND];
 
-        fn from_stored<C: crate::Codec>(
+        fn from_stored<C: Codec>(
             kind: &str,
             data: &[u8],
             codec: &C,
-        ) -> Result<Self, crate::EventDecodeError<C::Error>> {
+        ) -> Result<Self, EventDecodeError<C::Error>> {
             match kind {
                 "points-added" => Ok(Self::Added(
-                    codec
-                        .deserialize(data)
-                        .map_err(crate::EventDecodeError::Codec)?,
+                    codec.deserialize(data).map_err(EventDecodeError::Codec)?,
                 )),
-                _ => Err(crate::EventDecodeError::UnknownKind {
+                _ => Err(EventDecodeError::UnknownKind {
                     kind: kind.to_string(),
                     expected: Self::EVENT_KINDS,
                 }),
@@ -732,11 +735,8 @@ mod repository_test_ext_tests {
             .unwrap();
 
         // Inject concurrent event
-        repo.inject_concurrent_event::<Score>(
-            &"s1".to_string(),
-            PointsAdded { points: 50 }.into(),
-        )
-        .unwrap();
+        repo.inject_concurrent_event::<Score>(&"s1".to_string(), PointsAdded { points: 50 }.into())
+            .unwrap();
 
         // Verify both events are reflected
         let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();

@@ -190,11 +190,7 @@ where
             handler_count = self.handlers.len()
         )
     )]
-    pub fn load(self) -> Result<P, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
-    where
-        S::Metadata: Into<P::Metadata>,
-        P::Metadata: From<S::Metadata>,
-    {
+    pub fn load(self) -> Result<P, ProjectionError<S::Error, <S::Codec as Codec>::Error>> {
         tracing::debug!("loading projection");
 
         let events = self
@@ -206,7 +202,10 @@ where
         let mut projection = P::default();
 
         let event_count = events.len();
-        tracing::debug!(events_to_replay = event_count, "replaying events into projection");
+        tracing::debug!(
+            events_to_replay = event_count,
+            "replaying events into projection"
+        );
 
         for stored in events {
             let StoredEvent {

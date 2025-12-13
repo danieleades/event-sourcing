@@ -16,7 +16,7 @@ pub trait Aggregate: Default + Serialize + DeserializeOwned {
     type Error: std::error::Error;
 
     /// Identifier type for this aggregate
-    type Id: Display;
+    type Id;
 
     /// Route an event to the appropriate Apply implementation
     fn apply(&mut self, event: Self::Event);

@@ -11,6 +11,8 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 
+use crate::store::StreamKey;
+
 /// Point-in-time snapshot of aggregate state.
 ///
 /// The `position` field indicates the event stream position when this snapshot
@@ -209,9 +211,8 @@ impl SnapshotPolicy {
 /// ```
 #[derive(Clone, Debug)]
 pub struct InMemorySnapshotStore<Id, Pos> {
-    snapshots: HashMap<String, Snapshot<Pos>>,
+    snapshots: HashMap<StreamKey<Id>, Snapshot<Pos>>,
     policy: SnapshotPolicy,
-    _phantom: std::marker::PhantomData<Id>,
 }
 
 impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
@@ -224,7 +225,6 @@ impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
         Self {
             snapshots: HashMap::new(),
             policy: SnapshotPolicy::Always,
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -238,7 +238,6 @@ impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
         Self {
             snapshots: HashMap::new(),
             policy: SnapshotPolicy::EveryNEvents(n),
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -251,14 +250,7 @@ impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
         Self {
             snapshots: HashMap::new(),
             policy: SnapshotPolicy::Never,
-            _phantom: std::marker::PhantomData,
         }
-    }
-}
-
-impl<Id: std::fmt::Display, Pos> InMemorySnapshotStore<Id, Pos> {
-    fn key(aggregate_kind: &str, aggregate_id: &Id) -> String {
-        format!("{aggregate_kind}::{aggregate_id}")
     }
 }
 
@@ -268,7 +260,11 @@ impl<Id, Pos> Default for InMemorySnapshotStore<Id, Pos> {
     }
 }
 
-impl<Id: std::fmt::Display, Pos: Clone> SnapshotStore for InMemorySnapshotStore<Id, Pos> {
+impl<Id, Pos> SnapshotStore for InMemorySnapshotStore<Id, Pos>
+where
+    Id: Clone + Eq + std::hash::Hash,
+    Pos: Clone,
+{
     type Id = Id;
     type Position = Pos;
     type Error = Infallible;
@@ -279,7 +275,7 @@ impl<Id: std::fmt::Display, Pos: Clone> SnapshotStore for InMemorySnapshotStore<
         aggregate_kind: &str,
         aggregate_id: &Self::Id,
     ) -> Result<Option<Snapshot<Pos>>, Self::Error> {
-        let key = Self::key(aggregate_kind, aggregate_id);
+        let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         let snapshot = self.snapshots.get(&key).cloned();
         tracing::trace!(found = snapshot.is_some(), "snapshot lookup");
         Ok(snapshot)
@@ -294,12 +290,9 @@ impl<Id: std::fmt::Display, Pos: Clone> SnapshotStore for InMemorySnapshotStore<
         events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error> {
         if self.policy.should_snapshot(events_since_last_snapshot) {
-            let key = Self::key(aggregate_kind, aggregate_id);
+            let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
             self.snapshots.insert(key, snapshot);
-            tracing::debug!(
-                events_since_last_snapshot,
-                "snapshot saved"
-            );
+            tracing::debug!(events_since_last_snapshot, "snapshot saved");
         } else {
             tracing::trace!(
                 events_since_last_snapshot,

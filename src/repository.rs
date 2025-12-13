@@ -33,9 +33,8 @@ use std::marker::PhantomData;
 use thiserror::Error;
 
 use crate::{
-    ProjectionEvent, SerializableEvent,
     aggregate::{Aggregate, AggregateBuilder, Handle},
-    codec::Codec,
+    codec::{Codec, ProjectionEvent, SerializableEvent},
     concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked},
     projection::{Projection, ProjectionBuilder, ProjectionError},
     snapshot::{NoSnapshots, Snapshot, SnapshotStore},
@@ -132,13 +131,16 @@ type LoadError<S> =
 /// Contains all the information needed for command execution:
 /// - The aggregate state
 /// - The version for concurrency checking (position of last event, or snapshot position if no events after)
+/// - The number of events since the last snapshot (for snapshot policy decisions)
 struct LoadedAggregate<A, Pos> {
     aggregate: A,
     /// Position for optimistic concurrency checking.
     /// This is the position of the last event applied, or the snapshot position if no events followed.
     /// `None` only when no snapshot and no events exist (truly new aggregate).
     version: Option<Pos>,
-    _pos: std::marker::PhantomData<Pos>,
+    /// Number of events replayed since the last snapshot (or total events if no snapshot).
+    /// Used to correctly compute when to create new snapshots.
+    events_since_snapshot: u64,
 }
 
 /// Coordinates loading aggregates and persisting the resulting events.
@@ -153,10 +155,10 @@ struct LoadedAggregate<A, Pos> {
 ///
 /// - `S`: Event store implementation
 /// - `SS`: Snapshot store implementation
-/// - `C`: Concurrency strategy (defaults to [`Unchecked`])
+/// - `C`: Concurrency strategy (defaults to [`Optimistic`])
 ///
 /// The `EventStore::Id` and `SnapshotStore::Id` types must match, as must the position types.
-pub struct Repository<S, SS, C = Unchecked>
+pub struct Repository<S, SS, C = Optimistic>
 where
     S: EventStore,
     SS: SnapshotStore<Id = S::Id, Position = S::Position>,
@@ -346,7 +348,7 @@ where
         Ok(LoadedAggregate {
             aggregate,
             version,
-            _pos: std::marker::PhantomData,
+            events_since_snapshot: events_count as u64,
         })
     }
 }
@@ -432,11 +434,15 @@ where
     ) -> UncheckedCommandResult<A, S, SS>
     where
         A: Aggregate<Id = S::Id> + Handle<Cmd>,
-        A::Event: ProjectionEvent + SerializableEvent + Clone,
+        A::Event: ProjectionEvent + SerializableEvent,
         S::Metadata: Clone,
     {
         // Load aggregate (version not used in unchecked mode)
-        let LoadedAggregate { aggregate, .. } = self
+        let LoadedAggregate {
+            aggregate,
+            events_since_snapshot,
+            ..
+        } = self
             .load_aggregate::<A>(id)
             .map_err(CommandError::Projection)?;
 
@@ -458,11 +464,16 @@ where
 
         tracing::debug!(events_produced = events_count, "command handled");
 
-        // Begin transaction and append events (no version checking)
-        let mut tx = self.store.begin::<Unchecked>(A::KIND, id.clone(), None);
-
+        // Apply new events to aggregate for potential snapshotting.
+        let mut aggregate = aggregate;
         for event in &new_events {
-            tx.append(event.clone(), metadata.clone())
+            aggregate.apply(event);
+        }
+
+        // Begin transaction and append events (no version checking).
+        let mut tx = self.store.begin::<Unchecked>(A::KIND, id.clone(), None);
+        for event in new_events {
+            tx.append(event, metadata.clone())
                 .map_err(CommandError::Codec)?;
         }
 
@@ -476,12 +487,6 @@ where
             .map_err(CommandError::Store)?
             .expect("stream should have events after append");
 
-        // Apply new events to aggregate for potential snapshotting
-        let mut aggregate = aggregate;
-        for event in new_events {
-            aggregate.apply(&event);
-        }
-
         // Offer snapshot to the snapshot store using the store's codec
         let codec = self.store.codec();
         let snapshot = Snapshot {
@@ -489,8 +494,10 @@ where
             data: codec.serialize(&aggregate).map_err(CommandError::Codec)?,
         };
 
+        // Total events since last snapshot = events replayed + new events
+        let total_events_since_snapshot = events_since_snapshot + events_count as u64;
         self.snapshots
-            .offer_snapshot(A::KIND, id, snapshot, events_count as u64)
+            .offer_snapshot(A::KIND, id, snapshot, total_events_since_snapshot)
             .map_err(CommandError::Snapshot)?;
 
         tracing::info!(events_persisted = events_count, "command executed");
@@ -556,12 +563,14 @@ where
     ) -> OptimisticCommandResult<A, S, SS>
     where
         A: Aggregate<Id = S::Id> + Handle<Cmd>,
-        A::Event: ProjectionEvent + SerializableEvent + Clone,
+        A::Event: ProjectionEvent + SerializableEvent,
         S::Metadata: Clone,
     {
         // Load aggregate and track version
         let LoadedAggregate {
-            aggregate, version, ..
+            aggregate,
+            version,
+            events_since_snapshot,
         } = self
             .load_aggregate::<A>(id)
             .map_err(OptimisticCommandError::Projection)?;
@@ -584,12 +593,18 @@ where
 
         tracing::debug!(events_produced = events_count, "command handled");
 
+        // Apply new events to aggregate for potential snapshotting.
+        let mut aggregate = aggregate;
+        for event in &new_events {
+            aggregate.apply(event);
+        }
+
         // Begin transaction with expected version for optimistic concurrency
         // version=None means "expect new aggregate" (will be checked by append_new)
         let mut tx = self.store.begin::<Optimistic>(A::KIND, id.clone(), version);
 
-        for event in &new_events {
-            tx.append(event.clone(), metadata.clone())
+        for event in new_events {
+            tx.append(event, metadata.clone())
                 .map_err(OptimisticCommandError::Codec)?;
         }
 
@@ -615,12 +630,6 @@ where
             .map_err(OptimisticCommandError::Store)?
             .expect("stream should have events after append");
 
-        // Apply new events to aggregate for potential snapshotting
-        let mut aggregate = aggregate;
-        for event in new_events {
-            aggregate.apply(&event);
-        }
-
         // Offer snapshot to the snapshot store using the store's codec
         let codec = self.store.codec();
         let snapshot = Snapshot {
@@ -630,8 +639,10 @@ where
                 .map_err(OptimisticCommandError::Codec)?,
         };
 
+        // Total events since last snapshot = events replayed + new events
+        let total_events_since_snapshot = events_since_snapshot + events_count as u64;
         self.snapshots
-            .offer_snapshot(A::KIND, id, snapshot, events_count as u64)
+            .offer_snapshot(A::KIND, id, snapshot, total_events_since_snapshot)
             .map_err(OptimisticCommandError::Snapshot)?;
 
         tracing::info!(events_persisted = events_count, "command executed");
@@ -664,17 +675,16 @@ where
     ///     Err(e) => eprintln!("Failed after retries: {e}"),
     /// }
     /// ```
-    #[allow(clippy::type_complexity)]
     pub fn execute_with_retry<A, Cmd>(
         &mut self,
         id: &S::Id,
         command: &Cmd,
         metadata: &S::Metadata,
         max_retries: usize,
-    ) -> Result<usize, OptimisticCommandError<A::Error, S::Position, S::Error, <S::Codec as Codec>::Error, SS::Error>>
+    ) -> RetryResult<A, S, SS>
     where
         A: Aggregate<Id = S::Id> + Handle<Cmd>,
-        A::Event: ProjectionEvent + SerializableEvent + Clone,
+        A::Event: ProjectionEvent + SerializableEvent,
         S::Metadata: Clone,
     {
         for attempt in 1..=max_retries {

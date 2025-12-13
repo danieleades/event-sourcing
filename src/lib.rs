@@ -1,16 +1,15 @@
 #![doc = include_str!("../README.md")]
 
 mod aggregate;
-mod codec;
+pub mod codec;
 mod concurrency;
 mod event;
 mod projection;
 mod repository;
-mod snapshot;
-mod store;
+pub mod snapshot;
+pub mod store;
 
 pub use aggregate::{Aggregate, AggregateBuilder, Apply, Handle};
-pub use codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
 pub use concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked};
 pub use event::DomainEvent;
 pub use projection::{ApplyProjection, Projection, ProjectionBuilder, ProjectionError};
@@ -18,11 +17,10 @@ pub use repository::{
     CommandError, OptimisticCommandError, OptimisticCommandResult, Repository, RetryResult,
     UncheckedCommandResult,
 };
-pub use snapshot::{InMemorySnapshotStore, NoSnapshots, Snapshot, SnapshotStore};
-pub use store::{
-    AppendError, EventFilter, EventStore, InMemoryError, InMemoryEventStore, JsonCodec,
-    LoadEventsResult, PersistableEvent, StoredEvent, Transaction,
-};
+
+// "Happy path" defaults at the crate root.
+pub use snapshot::{InMemorySnapshotStore, NoSnapshots};
+pub use store::{InMemoryEventStore, JsonCodec};
 
 // Test utilities module: public when feature enabled, internal for crate tests
 #[cfg(feature = "test-util")]
@@ -35,6 +33,10 @@ pub(crate) mod test;
 mod tests {
     use super::*;
     use crate::test::RepositoryTestExt;
+    use crate::{
+        codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent},
+        store::{AppendError, EventFilter, EventStore, PersistableEvent},
+    };
     use serde::Serialize;
     use std::collections::HashMap;
 
@@ -67,7 +69,7 @@ mod tests {
     }
 
     impl SerializableEvent for CounterEvent {
-        fn to_persistable<C: crate::Codec, M>(
+        fn to_persistable<C: Codec, M>(
             self,
             codec: &C,
             metadata: M,
@@ -90,7 +92,7 @@ mod tests {
     impl ProjectionEvent for CounterEvent {
         const EVENT_KINDS: &'static [&'static str] = &[ValueAdded::KIND, ValueSubtracted::KIND];
 
-        fn from_stored<C: crate::Codec>(
+        fn from_stored<C: Codec>(
             kind: &str,
             data: &[u8],
             codec: &C,
@@ -600,8 +602,11 @@ mod tests {
             }
         }
 
-        fn create_repository()
-        -> Repository<InMemoryEventStore<String, JsonCodec, ()>, NoSnapshots<String, u64>, Optimistic> {
+        fn create_repository() -> Repository<
+            InMemoryEventStore<String, JsonCodec, ()>,
+            NoSnapshots<String, u64>,
+            Optimistic,
+        > {
             Repository::new(InMemoryEventStore::new(JsonCodec))
         }
 
@@ -782,6 +787,109 @@ mod tests {
 
             // This should succeed because we re-load fresh each time
             assert!(result.is_ok());
+        }
+
+        struct ConflictOnceStore {
+            inner: InMemoryEventStore<String, JsonCodec, ()>,
+            conflict_next_append_expecting_new: bool,
+        }
+
+        impl ConflictOnceStore {
+            fn new() -> Self {
+                Self {
+                    inner: InMemoryEventStore::new(JsonCodec),
+                    conflict_next_append_expecting_new: true,
+                }
+            }
+        }
+
+        impl EventStore for ConflictOnceStore {
+            type Id = String;
+            type Position = u64;
+            type Error = crate::store::InMemoryError;
+            type Codec = JsonCodec;
+            type Metadata = ();
+
+            fn codec(&self) -> &Self::Codec {
+                self.inner.codec()
+            }
+
+            fn stream_version(
+                &self,
+                aggregate_kind: &str,
+                aggregate_id: &Self::Id,
+            ) -> Result<Option<Self::Position>, Self::Error> {
+                self.inner.stream_version(aggregate_kind, aggregate_id)
+            }
+
+            fn begin<C: ConcurrencyStrategy>(
+                &mut self,
+                aggregate_kind: &str,
+                aggregate_id: Self::Id,
+                expected_version: Option<Self::Position>,
+            ) -> crate::store::Transaction<'_, Self, C> {
+                crate::store::Transaction::new(
+                    self,
+                    aggregate_kind.to_string(),
+                    aggregate_id,
+                    expected_version,
+                )
+            }
+
+            fn append(
+                &mut self,
+                aggregate_kind: &str,
+                aggregate_id: &Self::Id,
+                expected_version: Option<Self::Position>,
+                events: Vec<PersistableEvent<Self::Metadata>>,
+            ) -> Result<(), AppendError<Self::Position, Self::Error>> {
+                self.inner
+                    .append(aggregate_kind, aggregate_id, expected_version, events)
+            }
+
+            fn load_events(
+                &self,
+                filters: &[EventFilter<Self::Id, Self::Position>],
+            ) -> crate::store::LoadEventsResult<Self::Id, Self::Position, Self::Metadata, Self::Error>
+            {
+                self.inner.load_events(filters)
+            }
+
+            fn append_expecting_new(
+                &mut self,
+                aggregate_kind: &str,
+                aggregate_id: &Self::Id,
+                events: Vec<PersistableEvent<Self::Metadata>>,
+            ) -> Result<(), AppendError<Self::Position, Self::Error>> {
+                if self.conflict_next_append_expecting_new {
+                    self.conflict_next_append_expecting_new = false;
+                    return Err(ConcurrencyConflict {
+                        expected: None,
+                        actual: Some(999),
+                    }
+                    .into());
+                }
+
+                self.inner
+                    .append_expecting_new(aggregate_kind, aggregate_id, events)
+            }
+        }
+
+        #[test]
+        fn execute_with_retry_retries_on_concurrency_conflict() {
+            let store = ConflictOnceStore::new();
+            let mut repo = Repository::new(store);
+
+            let attempts = repo
+                .execute_with_retry::<Counter, AddValue>(
+                    &"c1".to_string(),
+                    &AddValue { amount: 10 },
+                    &(),
+                    3,
+                )
+                .unwrap();
+
+            assert_eq!(attempts, 2);
         }
     }
 

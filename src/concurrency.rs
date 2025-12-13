@@ -19,14 +19,15 @@ use thiserror::Error;
 
 /// No version checking - last writer wins.
 ///
-/// This is the default concurrency strategy. Events are appended without
-/// checking whether other events were added since loading. Suitable for
-/// single-writer scenarios or when conflicts are acceptable.
+/// Events are appended without checking whether other events were added
+/// since loading. Suitable for single-writer scenarios or when conflicts
+/// are acceptable.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Unchecked;
 
 /// Optimistic concurrency control - version checked on every write.
 ///
+/// This is the default concurrency strategy for [`Repository`](crate::Repository).
 /// With this strategy, the repository tracks the stream version when loading
 /// an aggregate and verifies it hasn't changed before appending new events.
 /// If the version changed (another writer appended events), the operation

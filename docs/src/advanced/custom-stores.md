@@ -57,10 +57,9 @@ CREATE INDEX idx_events_kind
 ## Implementation Skeleton
 
 ```rust,ignore
-use event_sourcing::{
-    Codec, EventFilter, EventStore, JsonCodec,
-    PersistableEvent, StoredEvent, Transaction,
-};
+use event_sourcing::JsonCodec;
+use event_sourcing::codec::Codec;
+use event_sourcing::store::{EventFilter, EventStore, PersistableEvent, StoredEvent, Transaction};
 
 pub struct PostgresEventStore {
     pool: sqlx::PgPool,

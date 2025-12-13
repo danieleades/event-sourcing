@@ -170,10 +170,7 @@ fn part2_conflict_detection(
     // Simulate a concurrent modification by injecting an event
     // This is what would happen if another process/thread modified the aggregate
     println!("3. Simulating concurrent modification (another process reserves 20 units)...");
-    repo.inject_concurrent_event::<InventoryItem>(
-        item_id,
-        ItemReserved { quantity: 20 }.into(),
-    )?;
+    repo.inject_concurrent_event::<InventoryItem>(item_id, ItemReserved { quantity: 20 }.into())?;
 
     let item: InventoryItem = repo.aggregate_builder().load(item_id)?;
     println!(
@@ -217,17 +214,18 @@ fn part3_retry_pattern() -> Result<(OptimisticRepo, String), Box<dyn std::error:
 
     // Inject a conflict before the retry helper runs
     // In a real system, this might be another service instance
-    repo.inject_concurrent_event::<InventoryItem>(
-        &item_id,
-        ItemReserved { quantity: 5 }.into(),
-    )?;
+    repo.inject_concurrent_event::<InventoryItem>(&item_id, ItemReserved { quantity: 5 }.into())?;
     println!("   Injected concurrent reservation of 5 units (simulating race condition)");
 
     // Use the built-in execute_with_retry method.
     // This automatically reloads and retries on ConcurrencyConflict errors.
     println!("\n6. Attempting to reserve 10 units with execute_with_retry...");
-    let attempts: InventoryRetryResult =
-        repo.execute_with_retry::<InventoryItem, _>(&item_id, &ReserveItem { quantity: 10 }, &(), 3);
+    let attempts: InventoryRetryResult = repo.execute_with_retry::<InventoryItem, _>(
+        &item_id,
+        &ReserveItem { quantity: 10 },
+        &(),
+        3,
+    );
     let attempts = attempts?;
     println!("   Succeeded on attempt {attempts}");
 

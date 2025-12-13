@@ -13,6 +13,21 @@ use thiserror::Error;
 use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked};
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct StreamKey<Id> {
+    aggregate_kind: String,
+    aggregate_id: Id,
+}
+
+impl<Id> StreamKey<Id> {
+    pub(crate) fn new(aggregate_kind: impl Into<String>, aggregate_id: Id) -> Self {
+        Self {
+            aggregate_kind: aggregate_kind.into(),
+            aggregate_id,
+        }
+    }
+}
+
 /// Raw event data ready to be written to a store backend.
 ///
 /// This is the boundary between Repository and `EventStore`. Repository serializes
@@ -272,9 +287,9 @@ impl<S: EventStore, C: ConcurrencyStrategy> Drop for Transaction<'_, S, C> {
 pub trait EventStore {
     /// Aggregate identifier type.
     ///
-    /// This type must be clonable for storage and hashable/equatable for lookups.
+    /// This type must be clonable so repositories can reuse IDs across calls.
     /// Common choices: `String`, `Uuid`, or custom ID types.
-    type Id: Clone + Eq + std::hash::Hash;
+    type Id: Clone;
 
     /// Position type used for ordering events and version checking.
     ///
@@ -382,7 +397,7 @@ pub trait EventStore {
 /// interleave events by time rather than by stream name.
 ///
 /// Generic over:
-/// - `Id`: Aggregate identifier type (must be displayable for stream key generation)
+/// - `Id`: Aggregate identifier type (must be hashable/equatable for map keys)
 /// - `C`: Serialization codec
 /// - `M`: Metadata type (use `()` when not needed)
 pub struct InMemoryEventStore<Id, C, M>
@@ -390,7 +405,7 @@ where
     C: Codec,
 {
     codec: C,
-    streams: HashMap<String, Vec<StoredEvent<Id, u64, M>>>,
+    streams: HashMap<StreamKey<Id>, Vec<StoredEvent<Id, u64, M>>>,
     next_position: u64,
 }
 
@@ -423,7 +438,7 @@ impl From<Infallible> for InMemoryError {
 
 impl<Id, C, M> EventStore for InMemoryEventStore<Id, C, M>
 where
-    Id: Clone + Eq + std::hash::Hash + std::fmt::Display,
+    Id: Clone + Eq + std::hash::Hash,
     C: Codec,
     M: Clone,
 {
@@ -443,7 +458,7 @@ where
         aggregate_kind: &str,
         aggregate_id: &Self::Id,
     ) -> Result<Option<u64>, Self::Error> {
-        let stream_key = format!("{aggregate_kind}::{aggregate_id}");
+        let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         let version = self
             .streams
             .get(&stream_key)
@@ -482,11 +497,7 @@ where
                 .stream_version(aggregate_kind, aggregate_id)
                 .map_err(AppendError::store)?;
             if current != Some(expected) {
-                tracing::debug!(
-                    ?expected,
-                    ?current,
-                    "version mismatch, rejecting append"
-                );
+                tracing::debug!(?expected, ?current, "version mismatch, rejecting append");
                 return Err(ConcurrencyConflict {
                     expected: Some(expected),
                     actual: current,
@@ -495,7 +506,7 @@ where
             }
         }
 
-        let stream_key = format!("{aggregate_kind}::{aggregate_id}");
+        let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         let stored: Vec<StoredEvent<Id, u64, M>> = events
             .into_iter()
             .map(|e| {
@@ -545,7 +556,7 @@ where
         }
 
         // Stream is empty, proceed with append (no further version check needed)
-        let stream_key = format!("{aggregate_kind}::{aggregate_id}");
+        let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         let stored: Vec<StoredEvent<Id, u64, M>> = events
             .into_iter()
             .map(|e| {
@@ -578,17 +589,17 @@ where
         use std::collections::HashSet;
 
         let mut result = Vec::new();
-        let mut seen: HashSet<(String, Id, String)> = HashSet::new(); // (aggregate_kind, aggregate_id, event_kind)
+        let mut seen: HashSet<(StreamKey<Id>, String)> = HashSet::new(); // (stream key, event kind)
 
         // Group filters by aggregate ID, tracking each filter's individual position constraint
         // Maps event_kind -> after_position for that specific filter
         let mut all_kinds: HashMap<String, Option<u64>> = HashMap::new(); // Filters with no aggregate restriction
-        let mut by_aggregate: HashMap<(String, Id), HashMap<String, Option<u64>>> = HashMap::new(); // Filters targeting a specific aggregate
+        let mut by_aggregate: HashMap<StreamKey<Id>, HashMap<String, Option<u64>>> = HashMap::new(); // Filters targeting a specific aggregate
 
         for filter in filters {
             if let (Some(kind), Some(id)) = (&filter.aggregate_kind, &filter.aggregate_id) {
                 by_aggregate
-                    .entry((kind.clone(), id.clone()))
+                    .entry(StreamKey::new(kind.clone(), id.clone()))
                     .or_default()
                     .insert(filter.event_kind.clone(), filter.after_position);
             } else {
@@ -603,9 +614,8 @@ where
             };
 
         // Load events for specific aggregates
-        for ((aggregate_kind, aggregate_id), kinds) in &by_aggregate {
-            let stream_key = format!("{aggregate_kind}::{aggregate_id}");
-            if let Some(stream) = self.streams.get(&stream_key) {
+        for (stream_key, kinds) in &by_aggregate {
+            if let Some(stream) = self.streams.get(stream_key) {
                 for event in stream {
                     // Check if this event kind is requested AND passes its specific position filter
                     if let Some(&after_pos) = kinds.get(&event.kind)
@@ -613,8 +623,10 @@ where
                     {
                         // Track that we've seen this (aggregate_kind, aggregate_id, kind) triple
                         seen.insert((
-                            event.aggregate_kind.clone(),
-                            event.aggregate_id.clone(),
+                            StreamKey::new(
+                                event.aggregate_kind.clone(),
+                                event.aggregate_id.clone(),
+                            ),
                             event.kind.clone(),
                         ));
                         result.push(event.clone());
@@ -633,8 +645,10 @@ where
                         && passes_position_filter(event, after_pos)
                     {
                         let key = (
-                            event.aggregate_kind.clone(),
-                            event.aggregate_id.clone(),
+                            StreamKey::new(
+                                event.aggregate_kind.clone(),
+                                event.aggregate_id.clone(),
+                            ),
                             event.kind.clone(),
                         );
                         if !seen.contains(&key) {
@@ -656,7 +670,7 @@ where
 /// JSON codec backed by `serde_json`.
 pub struct JsonCodec;
 
-impl crate::Codec for JsonCodec {
+impl crate::codec::Codec for JsonCodec {
     type Error = serde_json::Error;
 
     fn serialize<T>(&self, value: &T) -> Result<Vec<u8>, Self::Error>

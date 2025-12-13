@@ -46,10 +46,9 @@ impl Apply<FundsWithdrawn> for Account {
 ### Without Derive Macro
 
 ```rust,ignore
-use event_sourcing::{
-    Aggregate, Codec, DomainEvent,
-    PersistableEvent, ProjectionEvent, SerializableEvent,
-};
+use event_sourcing::{Aggregate, DomainEvent};
+use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
+use event_sourcing::store::PersistableEvent;
 use serde::{Deserialize, Serialize};
 
 // Events (same as before)
@@ -113,11 +112,18 @@ impl ProjectionEvent for AccountEvent {
         kind: &str,
         data: &[u8],
         codec: &C,
-    ) -> Result<Self, C::Error> {
+    ) -> Result<Self, EventDecodeError<C::Error>> {
         match kind {
-            FundsDeposited::KIND => Ok(Self::Deposited(codec.deserialize(data)?)),
-            FundsWithdrawn::KIND => Ok(Self::Withdrawn(codec.deserialize(data)?)),
-            other => panic!("unknown event kind: {}", other),
+            FundsDeposited::KIND => Ok(Self::Deposited(
+                codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+            )),
+            FundsWithdrawn::KIND => Ok(Self::Withdrawn(
+                codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+            )),
+            _ => Err(EventDecodeError::UnknownKind {
+                kind: kind.to_string(),
+                expected: Self::EVENT_KINDS,
+            }),
         }
     }
 }

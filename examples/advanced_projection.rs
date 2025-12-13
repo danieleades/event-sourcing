@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 
-use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::Aggregate;
+use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{
     Apply, ApplyProjection, DomainEvent, InMemoryEventStore, JsonCodec, Projection, Repository,
 };
@@ -176,22 +176,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     repository.seed_events::<Sale>(
         &sale_id,
-        vec![SaleCompleted {
-            sale_id: "sale-123".into(),
-            product_sku: "SKU-007".into(),
-            quantity: 2,
-        }
-        .into()],
+        vec![
+            SaleCompleted {
+                sale_id: "sale-123".into(),
+                product_sku: "SKU-007".into(),
+                quantity: 2,
+            }
+            .into(),
+        ],
     )?;
 
     repository.seed_events::<Promotion>(
         &promotion_id,
-        vec![PromotionApplied {
-            promotion_id: "promo-42".into(),
-            product_sku: "SKU-007".into(),
-            amount_cents: 300,
-        }
-        .into()],
+        vec![
+            PromotionApplied {
+                promotion_id: "promo-42".into(),
+                product_sku: "SKU-007".into(),
+                amount_cents: 300,
+            }
+            .into(),
+        ],
     )?;
 
     // Build the projection with mixed filters.

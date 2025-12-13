@@ -16,9 +16,10 @@
 //!
 //! Run with: `cargo run --example versioned_events`
 
+use event_sourcing::codec::ProjectionEvent;
+use event_sourcing::store::{EventFilter, EventStore};
 use event_sourcing::{
-    Aggregate, Apply, DomainEvent, EventFilter, EventStore, Handle, InMemoryEventStore, JsonCodec,
-    ProjectionEvent, Repository,
+    Aggregate, Apply, DomainEvent, Handle, InMemoryEventStore, JsonCodec, Repository,
 };
 use serde::{Deserialize, Serialize};
 use serde_evolve::Versioned;
