@@ -184,7 +184,8 @@ Read models that keep their state in sync by replaying events. Projections imple
 `ApplyProjection<E, M>` for the event/metadata combinations they care about and declare their
 metadata requirements via the `Projection` trait. Build them by calling
 `Repository::build_projection::<P>()`, chaining the relevant `.event::<E>()` / `.event_for::<A, E>()`
-registrations, and finally `.load()`.
+registrations (or `.events::<A::Event>()` / `.events_for::<A>()` for aggregate event enums), and
+finally `.load()`.
 
 ### Event context
 

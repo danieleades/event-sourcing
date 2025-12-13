@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::{
     aggregate::Aggregate,
-    codec::Codec,
+    codec::{Codec, EventDecodeError, ProjectionEvent},
     event::DomainEvent,
     store::{EventFilter, EventStore, StoredEvent},
 };
@@ -64,6 +64,18 @@ where
 }
 
 /// Type alias for event handler closures.
+#[derive(Debug)]
+enum HandlerError<CodecError> {
+    Codec(CodecError),
+    EventDecode(EventDecodeError<CodecError>),
+}
+
+impl<CodecError> From<CodecError> for HandlerError<CodecError> {
+    fn from(error: CodecError) -> Self {
+        Self::Codec(error)
+    }
+}
+
 type EventHandler<P, S> = Box<
     dyn Fn(
         &mut P,
@@ -71,7 +83,7 @@ type EventHandler<P, S> = Box<
         &[u8],
         &<S as EventStore>::Metadata,
         &<S as EventStore>::Codec,
-    ) -> Result<(), <<S as EventStore>::Codec as Codec>::Error>,
+    ) -> Result<(), HandlerError<<<S as EventStore>::Codec as Codec>::Error>>,
 >;
 
 /// Builder used to configure which events should be loaded for a projection.
@@ -134,7 +146,43 @@ where
         self
     }
 
+    /// Register all event kinds supported by a `ProjectionEvent` sum type across all aggregates.
+    ///
+    /// This is primarily intended for subscribing to an aggregate's generated event enum
+    /// (`A::Event` from `#[derive(Aggregate)]`) as a single "unit", rather than registering each
+    /// `DomainEvent` type individually.
+    ///
+    /// # Example
+    /// ```ignore
+    /// builder.events::<AccountEvent>() // All accounts, all account event variants
+    /// ```
+    #[must_use]
+    pub fn events<E>(mut self) -> Self
+    where
+        E: ProjectionEvent,
+        P: ApplyProjection<S::Id, E, P::Metadata>,
+        S::Metadata: Clone + Into<P::Metadata>,
+    {
+        for &kind in E::EVENT_KINDS {
+            self.filters.push(EventFilter::for_event(kind));
+            self.handlers.insert(
+                kind.to_string(),
+                Box::new(move |proj, agg_id, data, metadata, codec| {
+                    let event =
+                        E::from_stored(kind, data, codec).map_err(HandlerError::EventDecode)?;
+                    let metadata_converted: P::Metadata = metadata.clone().into();
+                    ApplyProjection::apply_projection(proj, agg_id, &event, &metadata_converted);
+                    Ok(())
+                }),
+            );
+        }
+        self
+    }
+
     /// Register a specific event type to load from a specific aggregate instance.
+    ///
+    /// Use this when you only care about a single event kind. If you want to subscribe to an
+    /// aggregate's full event enum (`A::Event`), prefer [`ProjectionBuilder::events_for`].
     ///
     /// # Example
     /// ```ignore
@@ -162,6 +210,46 @@ where
                 Ok(())
             }),
         );
+        self
+    }
+
+    /// Register all event kinds for a specific aggregate instance.
+    ///
+    /// This subscribes the projection to the aggregate's event sum type (`A::Event`) and loads
+    /// all events in that stream that correspond to `A::Event::EVENT_KINDS`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let history = repository
+    ///     .build_projection::<AccountHistory>()
+    ///     .events_for::<Account>(&account_id)
+    ///     .load()?;
+    /// ```
+    #[must_use]
+    pub fn events_for<A>(mut self, aggregate_id: &S::Id) -> Self
+    where
+        A: Aggregate<Id = S::Id>,
+        A::Event: ProjectionEvent,
+        P: ApplyProjection<S::Id, A::Event, P::Metadata>,
+        S::Metadata: Clone + Into<P::Metadata>,
+    {
+        for &kind in <A::Event as ProjectionEvent>::EVENT_KINDS {
+            self.filters.push(EventFilter::for_aggregate(
+                kind,
+                A::KIND,
+                aggregate_id.clone(),
+            ));
+            self.handlers.insert(
+                kind.to_string(),
+                Box::new(move |proj, agg_id, data, metadata, codec| {
+                    let event = <A::Event as ProjectionEvent>::from_stored(kind, data, codec)
+                        .map_err(HandlerError::EventDecode)?;
+                    let metadata_converted: P::Metadata = metadata.clone().into();
+                    ApplyProjection::apply_projection(proj, agg_id, &event, &metadata_converted);
+                    Ok(())
+                }),
+            );
+        }
         self
     }
 
@@ -211,9 +299,12 @@ where
             // O(1) handler lookup instead of O(n) linear scan
             if let Some(handler) = self.handlers.get(&kind) {
                 (handler)(&mut projection, &aggregate_id, &data, &metadata, codec).map_err(
-                    |error| ProjectionError::Codec {
-                        event_kind: kind.clone(),
-                        error,
+                    |error| match error {
+                        HandlerError::Codec(error) => ProjectionError::Codec {
+                            event_kind: kind.clone(),
+                            error,
+                        },
+                        HandlerError::EventDecode(error) => ProjectionError::EventDecode(error),
                     },
                 )?;
             }

@@ -263,15 +263,14 @@ impl<S: EventStore> Transaction<'_, S, Optimistic> {
 
 impl<S: EventStore, C: ConcurrencyStrategy> Drop for Transaction<'_, S, C> {
     fn drop(&mut self) {
-        // Silently discard uncommitted events (rollback).
-        // This allows codec/validation errors during append() to be handled gracefully
-        // without panicking. The events were never persisted, so this is safe.
-        debug_assert!(
-            self.committed || self.events.is_empty(),
-            "Transaction for {} dropped with {} uncommitted events",
-            self.aggregate_kind,
-            self.events.len()
-        );
+        if !self.committed && !self.events.is_empty() {
+            tracing::trace!(
+                aggregate_kind = %self.aggregate_kind,
+                expected_version = ?self.expected_version,
+                event_count = self.events.len(),
+                "transaction dropped without commit; discarding buffered events"
+            );
+        }
     }
 }
 

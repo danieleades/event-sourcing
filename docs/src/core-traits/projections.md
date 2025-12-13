@@ -125,13 +125,12 @@ let report = repository
 
 ## Filtering by Aggregate
 
-Use `.event_for()` to load events from a specific aggregate instance:
+Use `.events_for()` to load all events for a specific aggregate instance:
 
 ```rust,ignore
 let account_history = repository
     .build_projection::<TransactionHistory>()
-    .event_for::<Account, FundsDeposited>(&account_id)
-    .event_for::<Account, FundsWithdrawn>(&account_id)
+    .events_for::<Account>(&account_id)
     .load()?;
 ```
 

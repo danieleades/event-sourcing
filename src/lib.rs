@@ -204,6 +204,24 @@ mod tests {
         }
     }
 
+    impl ApplyProjection<String, CounterEvent, ()> for CounterProjection {
+        fn apply_projection(
+            &mut self,
+            aggregate_id: &String,
+            event: &CounterEvent,
+            _metadata: &(),
+        ) {
+            match event {
+                CounterEvent::Added(e) => {
+                    *self.totals.entry(aggregate_id.clone()).or_default() += e.amount;
+                }
+                CounterEvent::Subtracted(e) => {
+                    *self.totals.entry(aggregate_id.clone()).or_default() -= e.amount;
+                }
+            }
+        }
+    }
+
     // ============================================================================
     // EventFilter Tests
     // ============================================================================
@@ -510,7 +528,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg_attr(debug_assertions, should_panic(expected = "dropped with"))]
         fn drop_discards_uncommitted_events() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
@@ -519,10 +536,9 @@ mod tests {
                 let mut tx = store.begin::<Unchecked>("counter", "c1".to_string(), None);
                 tx.append(CounterEvent::Added(ValueAdded { amount: 10 }), ())
                     .unwrap();
-                // tx dropped without commit - panics in debug mode
+                // tx dropped without commit - buffered events are discarded
             }
 
-            // In release mode, events are silently discarded
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
             let events = store.load_events(&filters).unwrap();
             assert!(events.is_empty());
@@ -720,6 +736,65 @@ mod tests {
 
             assert_eq!(projection.totals.get("c1"), Some(&10));
             assert_eq!(projection.totals.get("c2"), Some(&20));
+        }
+
+        #[test]
+        fn build_projection_can_subscribe_to_event_enum() {
+            let mut repo = create_repository();
+
+            repo.execute_command::<Counter, AddValue>(
+                &"c1".to_string(),
+                &AddValue { amount: 10 },
+                &(),
+            )
+            .unwrap();
+            repo.execute_command::<Counter, SubtractValue>(
+                &"c1".to_string(),
+                &SubtractValue { amount: 3 },
+                &(),
+            )
+            .unwrap();
+            repo.execute_command::<Counter, AddValue>(
+                &"c2".to_string(),
+                &AddValue { amount: 20 },
+                &(),
+            )
+            .unwrap();
+
+            let projection: CounterProjection = repo
+                .build_projection()
+                .events::<CounterEvent>()
+                .load()
+                .unwrap();
+
+            assert_eq!(projection.totals.get("c1"), Some(&7));
+            assert_eq!(projection.totals.get("c2"), Some(&20));
+        }
+
+        #[test]
+        fn build_projection_can_subscribe_to_event_enum_for_one_stream() {
+            let mut repo = create_repository();
+            let c1 = "c1".to_string();
+
+            repo.execute_command::<Counter, AddValue>(&c1, &AddValue { amount: 10 }, &())
+                .unwrap();
+            repo.execute_command::<Counter, SubtractValue>(&c1, &SubtractValue { amount: 3 }, &())
+                .unwrap();
+            repo.execute_command::<Counter, AddValue>(
+                &"c2".to_string(),
+                &AddValue { amount: 20 },
+                &(),
+            )
+            .unwrap();
+
+            let projection: CounterProjection = repo
+                .build_projection()
+                .events_for::<Counter>(&c1)
+                .load()
+                .unwrap();
+
+            assert_eq!(projection.totals.get("c1"), Some(&7));
+            assert_eq!(projection.totals.get("c2"), None);
         }
 
         #[test]
