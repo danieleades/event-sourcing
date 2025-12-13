@@ -61,33 +61,25 @@ match repo.execute_command::<MyAggregate, MyCommand>(&id, &command, &metadata) {
 
 ## Handling Conflicts
 
-The most common pattern for handling conflicts is to **retry** the operation:
+The most common pattern for handling conflicts is to **retry** the operation.
+
+The repository provides a helper for this: `execute_with_retry`.
 
 ```rust,ignore
-fn execute_with_retry<A, C>(
-    repo: &mut Repository<S, Optimistic>,
-    id: &A::Id,
-    command: &C,
-    metadata: &S::Metadata,
-    max_retries: usize,
-) -> Result<(), OptimisticCommandError<...>>
-where
-    A: Aggregate + Handle<C>,
-{
-    for _ in 0..max_retries {
-        match repo.execute_command::<A, C>(id, command, metadata) {
-            Ok(()) => return Ok(()),
-            Err(OptimisticCommandError::Concurrency(_)) => continue,
-            Err(e) => return Err(e),
-        }
-    }
-    // Final attempt
-    repo.execute_command::<A, C>(id, command, metadata)
-}
+use event_sourcing::RetryResult;
+
+let attempts: RetryResult<MyAggregate, MyStore> =
+    repo.execute_with_retry::<MyAggregate, MyCommand>(&id, &command, &metadata, 3);
+
+let attempts = attempts?;
+println!("Succeeded after {attempts} attempt(s)");
 ```
 
 Each retry loads fresh state from the event store, so business rules are always validated
 against the current aggregate state.
+
+`max_retries` controls how many *retries after the first attempt* are allowed, so the
+operation is attempted up to `max_retries + 1` times total.
 
 ## When to Use Optimistic Concurrency
 

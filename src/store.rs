@@ -152,7 +152,7 @@ pub struct Transaction<'a, S: EventStore, C: ConcurrencyStrategy = Unchecked> {
 }
 
 impl<'a, S: EventStore, C: ConcurrencyStrategy> Transaction<'a, S, C> {
-    pub(crate) const fn new(
+    pub const fn new(
         store: &'a mut S,
         aggregate_kind: String,
         aggregate_id: S::Id,
@@ -283,6 +283,7 @@ impl<S: EventStore, C: ConcurrencyStrategy> Drop for Transaction<'_, S, C> {
 /// - `Position`: Ordering strategy (`()` for stream-based, `u64` for global ordering)
 /// - `Metadata`: Infrastructure metadata type (timestamps, causation tracking, etc.)
 /// - `Codec`: Serialization strategy for domain events
+// ANCHOR: event_store_trait
 pub trait EventStore {
     /// Aggregate identifier type.
     ///
@@ -388,6 +389,7 @@ pub trait EventStore {
         events: Vec<PersistableEvent<Self::Metadata>>,
     ) -> Result<(), AppendError<Self::Position, Self::Error>>;
 }
+// ANCHOR_END: event_store_trait
 
 /// In-memory event store that keeps streams in a hash map.
 ///

@@ -23,6 +23,7 @@ pub enum EventDecodeError<CodecError> {
 }
 
 /// Serialisation strategy used by event stores.
+// ANCHOR: codec_trait
 pub trait Codec {
     type Error: std::error::Error;
 
@@ -44,6 +45,7 @@ pub trait Codec {
     where
         T: serde::de::DeserializeOwned;
 }
+// ANCHOR_END: codec_trait
 
 /// Trait for event sum types that can serialize themselves for persistence.
 ///

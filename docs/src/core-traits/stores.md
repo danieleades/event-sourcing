@@ -5,46 +5,7 @@ The crate separates storage concerns into three traits: `EventStore` for event p
 ## The `EventStore` Trait
 
 ```rust,ignore
-pub trait EventStore {
-    /// Aggregate identifier type.
-    type Id: Clone;
-
-    /// Position type for ordering (e.g., `u64` for global sequence, `()` for unordered)
-    type Position: Copy + PartialEq + std::fmt::Debug;
-
-    /// Store-specific error type
-    type Error: std::error::Error;
-
-    /// Serialization strategy
-    type Codec: Codec;
-
-    /// Metadata type attached to events
-    type Metadata;
-
-    fn codec(&self) -> &Self::Codec;
-
-    fn stream_version(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Self::Position>, Self::Error>;
-
-    /// Begin a write transaction with a chosen concurrency strategy.
-    fn begin<C: ConcurrencyStrategy>(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: Self::Id,
-        expected_version: Option<Self::Position>,
-    ) -> Transaction<'_, Self, C>
-    where
-        Self: Sized;
-
-    /// Load events matching the given filters.
-    fn load_events(
-        &self,
-        filters: &[EventFilter<Self::Id, Self::Position>],
-    ) -> Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error>;
-}
+{{#include ../../../src/store.rs:event_store_trait}}
 ```
 
 ## Built-in: `InMemoryEventStore`
@@ -99,12 +60,7 @@ EventFilter::for_event("account.deposited").after(100)
 ## The `Codec` Trait
 
 ```rust,ignore
-pub trait Codec {
-    type Error: std::error::Error;
-
-    fn serialize<E: Serialize>(&self, event: &E) -> Result<Vec<u8>, Self::Error>;
-    fn deserialize<E: DeserializeOwned>(&self, data: &[u8]) -> Result<E, Self::Error>;
-}
+{{#include ../../../src/codec.rs:codec_trait}}
 ```
 
 ## Built-in: `JsonCodec`

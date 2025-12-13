@@ -20,10 +20,12 @@ use crate::{
 /// Implementors specify the metadata type their [`ApplyProjection`] handlers expect.
 /// Projections are typically rebuilt by calling [`Repository::build_projection`] and
 /// configuring the desired event streams before invoking [`ProjectionBuilder::load`].
+// ANCHOR: projection_trait
 pub trait Projection: Default + Sized {
     /// Metadata type expected by this projection
     type Metadata;
 }
+// ANCHOR_END: projection_trait
 
 /// Apply an event to a projection with access to envelope context.
 ///
@@ -38,9 +40,11 @@ pub trait Projection: Default + Sized {
 ///     }
 /// }
 /// ```
+// ANCHOR: apply_projection_trait
 pub trait ApplyProjection<Id, E, M> {
     fn apply_projection(&mut self, aggregate_id: &Id, event: &E, metadata: &M);
 }
+// ANCHOR_END: apply_projection_trait
 
 /// Errors that can occur when rebuilding a projection.
 #[derive(Debug, Error)]
