@@ -1,16 +1,16 @@
 //! Compile-time concurrency strategy selection.
 //!
-//! This module provides marker types for choosing between unchecked (last-writer-wins)
-//! and optimistic (version-checked) concurrency control at the type level.
+//! This module provides marker types for choosing between optimistic (version-checked)
+//! and unchecked (last-writer-wins) concurrency control at the type level.
 //!
 //! # Example
 //!
 //! ```ignore
-//! // Default: no version checking
+//! // Default: optimistic concurrency (safe)
 //! let repo = Repository::new(store);
 //!
-//! // Opt-in to optimistic concurrency
-//! let repo = Repository::new(store).with_optimistic_concurrency();
+//! // Opt-out for single-writer scenarios
+//! let repo = Repository::new(store).without_concurrency_checking();
 //! ```
 
 use std::fmt;
@@ -75,11 +75,17 @@ pub struct ConcurrencyConflict<Pos: fmt::Debug> {
 fn format_conflict<Pos: fmt::Debug>(expected: Option<&Pos>, actual: Option<&Pos>) -> String {
     match (expected, actual) {
         (None, Some(actual)) => {
-            format!("concurrency conflict: expected new stream, found version {actual:?}")
+            format!(
+                "concurrency conflict: expected new stream, found version {actual:?} \
+                 (hint: another process created this aggregate; reload and retry)"
+            )
         }
         (Some(expected), actual) => {
-            format!("concurrency conflict: expected version {expected:?}, found {actual:?}")
+            format!(
+                "concurrency conflict: expected version {expected:?}, found {actual:?} \
+                 (hint: stream was modified; reload and retry)"
+            )
         }
-        (None, None) => "concurrency conflict: unexpected state".to_string(),
+        (None, None) => "concurrency conflict: unexpected empty state".to_string(),
     }
 }

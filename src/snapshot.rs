@@ -139,6 +139,39 @@ impl<Id, Pos> SnapshotStore for NoSnapshots<Id, Pos> {
 }
 
 /// Snapshot creation policy.
+///
+/// # Choosing a Policy
+///
+/// The right policy depends on your aggregate's characteristics:
+///
+/// | Policy | Best For | Trade-off |
+/// |--------|----------|-----------|
+/// | `Always` | Expensive replay, low write volume | Storage cost per command |
+/// | `EveryNEvents(n)` | Most use cases | Balanced storage vs replay |
+/// | `Never` | Read replicas, external snapshot management | Full replay every load |
+///
+/// ## `Always`
+///
+/// Creates a snapshot after every command. Best for aggregates where:
+/// - Event replay is computationally expensive
+/// - Aggregates have many events (100+)
+/// - Read latency is more important than write overhead
+/// - Write volume is relatively low
+///
+/// ## `EveryNEvents(n)`
+///
+/// Creates a snapshot every N events. Recommended for most use cases.
+/// - Start with `n = 50-100` and tune based on profiling
+/// - Balances storage cost against replay time
+/// - Works well for aggregates with moderate event counts
+///
+/// ## `Never`
+///
+/// Never creates snapshots. Use when:
+/// - Running a read replica that consumes snapshots created elsewhere
+/// - Aggregates are short-lived (few events per instance)
+/// - Managing snapshots through an external process
+/// - Testing without snapshot overhead
 #[derive(Clone, Debug)]
 enum SnapshotPolicy {
     /// Create a snapshot after every command.
@@ -183,6 +216,9 @@ pub struct InMemorySnapshotStore<Id, Pos> {
 
 impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
     /// Create a snapshot store that saves after every command.
+    ///
+    /// Best for aggregates with expensive replay or many events.
+    /// See the policy guidelines above for choosing an appropriate cadence.
     #[must_use]
     pub fn always() -> Self {
         Self {
@@ -193,6 +229,10 @@ impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
     }
 
     /// Create a snapshot store that saves every N events.
+    ///
+    /// Recommended for most use cases. Start with `n = 50-100` and tune
+    /// based on your aggregate's replay cost.
+    /// See the policy guidelines above for choosing a policy.
     #[must_use]
     pub fn every(n: u64) -> Self {
         Self {
@@ -204,7 +244,8 @@ impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
 
     /// Create a snapshot store that never saves (load-only).
     ///
-    /// Useful for read replicas that consume snapshots created elsewhere.
+    /// Use for read replicas, short-lived aggregates, or when managing
+    /// snapshots externally. See the policy guidelines above for when this fits.
     #[must_use]
     pub fn never() -> Self {
         Self {
@@ -232,15 +273,19 @@ impl<Id: std::fmt::Display, Pos: Clone> SnapshotStore for InMemorySnapshotStore<
     type Position = Pos;
     type Error = Infallible;
 
+    #[tracing::instrument(skip(self, aggregate_id))]
     fn load(
         &self,
         aggregate_kind: &str,
         aggregate_id: &Self::Id,
     ) -> Result<Option<Snapshot<Pos>>, Self::Error> {
         let key = Self::key(aggregate_kind, aggregate_id);
-        Ok(self.snapshots.get(&key).cloned())
+        let snapshot = self.snapshots.get(&key).cloned();
+        tracing::trace!(found = snapshot.is_some(), "snapshot lookup");
+        Ok(snapshot)
     }
 
+    #[tracing::instrument(skip(self, aggregate_id, snapshot))]
     fn offer_snapshot(
         &mut self,
         aggregate_kind: &str,
@@ -251,6 +296,15 @@ impl<Id: std::fmt::Display, Pos: Clone> SnapshotStore for InMemorySnapshotStore<
         if self.policy.should_snapshot(events_since_last_snapshot) {
             let key = Self::key(aggregate_kind, aggregate_id);
             self.snapshots.insert(key, snapshot);
+            tracing::debug!(
+                events_since_last_snapshot,
+                "snapshot saved"
+            );
+        } else {
+            tracing::trace!(
+                events_since_last_snapshot,
+                "snapshot offer declined by policy"
+            );
         }
         Ok(())
     }

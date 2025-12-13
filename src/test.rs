@@ -1,9 +1,14 @@
 //! Test utilities for event-sourced aggregates.
 //!
-//! This module provides a test framework inspired by [cqrs-es](https://crates.io/crates/cqrs-es)
-//! for testing aggregate behavior in isolation, without requiring a real event store.
+//! This module provides testing utilities for event-sourced systems:
 //!
-//! # Example
+//! - [`TestFramework`]: BDD-style unit testing for aggregates in isolation
+//! - [`RepositoryTestExt`]: Extension trait for integration testing with real repositories
+//!
+//! # Unit Testing with [`TestFramework`]
+//!
+//! The [`TestFramework`] is inspired by [cqrs-es](https://crates.io/crates/cqrs-es)
+//! for testing aggregate behavior in isolation, without requiring a real event store.
 //!
 //! ```ignore
 //! use event_sourcing::test::TestFramework;
@@ -30,11 +35,231 @@
 //!         .then_expect_error_message("insufficient value");
 //! }
 //! ```
+//!
+//! # Integration Testing with [`RepositoryTestExt`]
+//!
+//! For integration tests that need a real repository, use [`RepositoryTestExt`]:
+//!
+//! ```ignore
+//! use event_sourcing::test::RepositoryTestExt;
+//!
+//! // Seed initial events (e.g., for projection tests)
+//! repo.seed_events::<Product>(&product_id, vec![
+//!     ProductRestocked { sku: "SKU-001".into(), quantity: 100 }.into(),
+//! ])?;
+//!
+//! // Simulate concurrent writes (e.g., for optimistic concurrency tests)
+//! repo.inject_concurrent_event::<InventoryItem>(
+//!     &item_id,
+//!     ItemReserved { quantity: 20 }.into(),
+//! )?;
+//! ```
 
 use std::fmt;
 use std::marker::PhantomData;
 
-use crate::{Aggregate, Handle};
+use thiserror::Error;
+
+use crate::concurrency::{ConcurrencyStrategy, Unchecked};
+use crate::snapshot::SnapshotStore;
+use crate::store::{AppendError, EventStore, PersistableEvent};
+use crate::{Aggregate, Codec, Handle, Repository, SerializableEvent};
+
+// =============================================================================
+// Repository Test Extension Trait
+// =============================================================================
+
+/// Error type for seeding operations.
+#[derive(Debug, Error)]
+pub enum SeedError<StoreError, CodecError>
+where
+    StoreError: std::error::Error + 'static,
+    CodecError: std::error::Error + 'static,
+{
+    /// Failed to serialize an event.
+    #[error("failed to serialize event: {0}")]
+    Codec(#[source] CodecError),
+    /// Failed to persist events to the store.
+    #[error("failed to persist event: {0}")]
+    Store(#[source] StoreError),
+}
+
+/// Extension trait providing test utilities for [`Repository`].
+///
+/// These methods are designed for testing scenarios where you need to:
+/// - Seed initial event history before testing commands or projections
+/// - Simulate concurrent modifications from other processes
+///
+/// All methods bypass the normal command handling flow, allowing you to
+/// set up test fixtures without going through aggregate business logic.
+///
+/// # Example
+///
+/// ```ignore
+/// use event_sourcing::test::RepositoryTestExt;
+///
+/// // Seed initial state for a projection test
+/// repo.seed_events::<Product>(&product_id, vec![
+///     ProductRestocked { sku: "SKU-001".into(), quantity: 100 }.into(),
+/// ])?;
+///
+/// // Simulate a concurrent write for optimistic concurrency testing
+/// repo.inject_concurrent_event::<Product>(
+///     &product_id,
+///     ProductEvent::from(ProductRestocked { sku: "SKU-001".into(), quantity: 50 }),
+/// )?;
+/// ```
+pub trait RepositoryTestExt<S, SS, C>
+where
+    S: EventStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
+{
+    /// Seed events for an aggregate, bypassing command handlers.
+    ///
+    /// Events are serialized through the codec, ensuring they can be loaded
+    /// correctly. This is useful for setting up test fixtures without
+    /// executing commands.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The aggregate instance identifier
+    /// * `events` - Events to append (must implement [`SerializableEvent`])
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SeedError::Codec`] if event serialization fails, or
+    /// [`SeedError::Store`] if persistence fails.
+    fn seed_events<A>(
+        &mut self,
+        id: &S::Id,
+        events: Vec<A::Event>,
+    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
+    where
+        A: Aggregate<Id = S::Id>,
+        A::Event: SerializableEvent,
+        S::Metadata: Default;
+
+    /// Inject a single event as if from a concurrent writer.
+    ///
+    /// This simulates what happens when another process appends events
+    /// to the same aggregate stream. The event goes through the codec
+    /// for proper serialization.
+    ///
+    /// Use this to test optimistic concurrency conflict detection.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The aggregate instance identifier
+    /// * `event` - The event to inject
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SeedError::Codec`] if serialization fails, or
+    /// [`SeedError::Store`] if persistence fails.
+    fn inject_concurrent_event<A>(
+        &mut self,
+        id: &S::Id,
+        event: A::Event,
+    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
+    where
+        A: Aggregate<Id = S::Id>,
+        A::Event: SerializableEvent,
+        S::Metadata: Default;
+
+    /// Inject a raw event without codec processing.
+    ///
+    /// This is the lowest-level test injection, allowing complete control
+    /// over the serialized form. Use this only when you need to test
+    /// specific wire formats or malformed data handling.
+    ///
+    /// # Arguments
+    ///
+    /// * `aggregate_kind` - The aggregate type identifier (e.g., `Aggregate::KIND`)
+    /// * `id` - The aggregate instance identifier
+    /// * `event` - Raw persistable event with pre-serialized data
+    ///
+    /// # Errors
+    ///
+    /// Returns a store error if persistence fails.
+    fn inject_raw_event(
+        &mut self,
+        aggregate_kind: &str,
+        id: &S::Id,
+        event: PersistableEvent<S::Metadata>,
+    ) -> Result<(), S::Error>;
+}
+
+impl<S, SS, C> RepositoryTestExt<S, SS, C> for Repository<S, SS, C>
+where
+    S: EventStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
+{
+    fn seed_events<A>(
+        &mut self,
+        id: &S::Id,
+        events: Vec<A::Event>,
+    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
+    where
+        A: Aggregate<Id = S::Id>,
+        A::Event: SerializableEvent,
+        S::Metadata: Default,
+    {
+        let mut tx = self.store.begin::<Unchecked>(A::KIND, id.clone(), None);
+
+        for event in events {
+            tx.append(event, S::Metadata::default())
+                .map_err(SeedError::Codec)?;
+        }
+
+        tx.commit().map_err(SeedError::Store)
+    }
+
+    fn inject_concurrent_event<A>(
+        &mut self,
+        id: &S::Id,
+        event: A::Event,
+    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
+    where
+        A: Aggregate<Id = S::Id>,
+        A::Event: SerializableEvent,
+        S::Metadata: Default,
+    {
+        let persistable = event
+            .to_persistable(self.store.codec(), S::Metadata::default())
+            .map_err(SeedError::Codec)?;
+
+        self.store
+            .append(A::KIND, id, None, vec![persistable])
+            .map_err(|e| match e {
+                AppendError::Store(e) => SeedError::Store(e),
+                AppendError::Conflict(_) => {
+                    unreachable!("no version check on inject_concurrent_event")
+                }
+            })
+    }
+
+    fn inject_raw_event(
+        &mut self,
+        aggregate_kind: &str,
+        id: &S::Id,
+        event: PersistableEvent<S::Metadata>,
+    ) -> Result<(), S::Error> {
+        self.store
+            .append(aggregate_kind, id, None, vec![event])
+            .map_err(|e| match e {
+                AppendError::Store(e) => e,
+                AppendError::Conflict(_) => {
+                    unreachable!("no version check on inject_raw_event")
+                }
+            })
+    }
+}
+
+// =============================================================================
+// Test Framework for Aggregate Unit Testing
+// =============================================================================
 
 /// Test framework for aggregate testing using a given-when-then pattern.
 ///
@@ -392,5 +617,152 @@ mod tests {
     #[test]
     fn default_creates_new_framework() {
         let _framework: TestFramework<Counter> = TestFramework::default();
+    }
+}
+
+#[cfg(test)]
+mod repository_test_ext_tests {
+    use super::*;
+    use crate::{DomainEvent, InMemoryEventStore, JsonCodec, PersistableEvent, ProjectionEvent};
+
+    // Test fixtures with SerializableEvent implementation
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct PointsAdded {
+        points: i32,
+    }
+
+    impl DomainEvent for PointsAdded {
+        const KIND: &'static str = "points-added";
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum ScoreEvent {
+        Added(PointsAdded),
+    }
+
+    impl SerializableEvent for ScoreEvent {
+        fn to_persistable<C: crate::Codec, M>(
+            self,
+            codec: &C,
+            metadata: M,
+        ) -> Result<PersistableEvent<M>, C::Error> {
+            match self {
+                Self::Added(e) => Ok(PersistableEvent {
+                    kind: PointsAdded::KIND.to_string(),
+                    data: codec.serialize(&e)?,
+                    metadata,
+                }),
+            }
+        }
+    }
+
+    impl ProjectionEvent for ScoreEvent {
+        const EVENT_KINDS: &'static [&'static str] = &[PointsAdded::KIND];
+
+        fn from_stored<C: crate::Codec>(
+            kind: &str,
+            data: &[u8],
+            codec: &C,
+        ) -> Result<Self, crate::EventDecodeError<C::Error>> {
+            match kind {
+                "points-added" => Ok(Self::Added(
+                    codec
+                        .deserialize(data)
+                        .map_err(crate::EventDecodeError::Codec)?,
+                )),
+                _ => Err(crate::EventDecodeError::UnknownKind {
+                    kind: kind.to_string(),
+                    expected: Self::EVENT_KINDS,
+                }),
+            }
+        }
+    }
+
+    impl From<PointsAdded> for ScoreEvent {
+        fn from(e: PointsAdded) -> Self {
+            Self::Added(e)
+        }
+    }
+
+    #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+    struct Score {
+        total: i32,
+    }
+
+    impl Aggregate for Score {
+        const KIND: &'static str = "score";
+        type Event = ScoreEvent;
+        type Error = String;
+        type Id = String;
+
+        fn apply(&mut self, event: &Self::Event) {
+            match event {
+                ScoreEvent::Added(e) => self.total += e.points,
+            }
+        }
+    }
+
+    #[test]
+    fn seed_events_appends_typed_events() {
+        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let mut repo = Repository::new(store);
+
+        repo.seed_events::<Score>(
+            &"s1".to_string(),
+            vec![
+                PointsAdded { points: 10 }.into(),
+                PointsAdded { points: 20 }.into(),
+            ],
+        )
+        .unwrap();
+
+        // Verify events are loadable
+        let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();
+        assert_eq!(loaded.total, 30);
+    }
+
+    #[test]
+    fn inject_concurrent_event_appends_single_event() {
+        let event_store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        let mut repo = Repository::new(event_store);
+
+        // Seed initial state
+        repo.seed_events::<Score>(&"s1".to_string(), vec![PointsAdded { points: 100 }.into()])
+            .unwrap();
+
+        // Inject concurrent event
+        repo.inject_concurrent_event::<Score>(
+            &"s1".to_string(),
+            PointsAdded { points: 50 }.into(),
+        )
+        .unwrap();
+
+        // Verify both events are reflected
+        let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();
+        assert_eq!(loaded.total, 150);
+    }
+
+    #[test]
+    fn inject_raw_event_appends_raw_bytes() {
+        let event_store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        let mut repo = Repository::new(event_store);
+
+        // Inject raw event with pre-serialized data
+        repo.inject_raw_event(
+            "score",
+            &"s1".to_string(),
+            PersistableEvent {
+                kind: "points-added".to_string(),
+                data: br#"{"points":42}"#.to_vec(),
+                metadata: (),
+            },
+        )
+        .unwrap();
+
+        // Verify event is loadable
+        let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();
+        assert_eq!(loaded.total, 42);
     }
 }

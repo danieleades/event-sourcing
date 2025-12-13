@@ -1,8 +1,8 @@
 //! Read-side primitives.
 //!
 //! Projections rebuild query models from streams of stored events. This module
-//! provides the projection trait, event application hooks, the optional
-//! `EventEnvelope`, and the `ProjectionBuilder` that wires everything together.
+//! provides the projection trait, event application hooks via [`ApplyProjection`],
+//! and the [`ProjectionBuilder`] that wires everything together.
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
@@ -54,8 +54,14 @@ where
 {
     #[error("failed to load events: {0}")]
     Store(#[source] StoreError),
+    #[error("failed to decode event kind `{event_kind}`: {error}")]
+    Codec {
+        event_kind: String,
+        #[source]
+        error: CodecError,
+    },
     #[error("failed to decode event: {0}")]
-    Codec(#[source] CodecError),
+    EventDecode(#[source] crate::codec::EventDecodeError<CodecError>),
     #[error("failed to deserialize snapshot: {0}")]
     SnapshotDeserialize(#[source] CodecError),
 }
@@ -176,11 +182,21 @@ where
     ///
     /// Returns [`ProjectionError`] when the store fails to load events or when
     /// an event cannot be deserialized.
+    #[tracing::instrument(
+        skip(self),
+        fields(
+            projection_type = std::any::type_name::<P>(),
+            filter_count = self.filters.len(),
+            handler_count = self.handlers.len()
+        )
+    )]
     pub fn load(self) -> Result<P, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
     where
         S::Metadata: Into<P::Metadata>,
         P::Metadata: From<S::Metadata>,
     {
+        tracing::debug!("loading projection");
+
         let events = self
             .repository
             .store
@@ -188,6 +204,9 @@ where
             .map_err(ProjectionError::Store)?;
         let codec = self.repository.store.codec();
         let mut projection = P::default();
+
+        let event_count = events.len();
+        tracing::debug!(events_to_replay = event_count, "replaying events into projection");
 
         for stored in events {
             let StoredEvent {
@@ -200,13 +219,18 @@ where
 
             // O(1) handler lookup instead of O(n) linear scan
             if let Some(handler) = self.handlers.get(&kind) {
-                (handler)(&mut projection, &aggregate_id, &data, &metadata, codec)
-                    .map_err(ProjectionError::Codec)?;
+                (handler)(&mut projection, &aggregate_id, &data, &metadata, codec).map_err(
+                    |error| ProjectionError::Codec {
+                        event_kind: kind.clone(),
+                        error,
+                    },
+                )?;
             }
             // Unknown kinds are intentionally skipped - projections only care about
             // the events they explicitly registered handlers for
         }
 
+        tracing::info!(events_applied = event_count, "projection loaded");
         Ok(projection)
     }
 }

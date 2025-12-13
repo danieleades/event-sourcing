@@ -1,14 +1,15 @@
 //! Demonstrates optimistic concurrency control for handling concurrent writes.
 //!
-//! This example shows how to use `Repository::with_optimistic_concurrency()` to
-//! detect and handle conflicts when multiple writers try to modify the same
-//! aggregate simultaneously.
+//! Optimistic concurrency is the default for `Repository`. This example shows
+//! how conflicts are detected and handled when multiple writers try to modify
+//! the same aggregate simultaneously.
 //!
 //! Run with: `cargo run --example optimistic_concurrency`
 
+use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{
-    Aggregate, Apply, DomainEvent, EventStore, Handle, InMemoryEventStore, JsonCodec,
-    OptimisticCommandError, PersistableEvent, Repository,
+    Apply, DomainEvent, Handle, InMemoryEventStore, JsonCodec, OptimisticCommandError, Repository,
+    RetryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,25 +59,10 @@ pub struct InventoryItem {
     available: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum InventoryError {
+    #[error("insufficient stock: requested {requested}, available {available}")]
     InsufficientStock { requested: u32, available: u32 },
-}
-
-impl std::fmt::Display for InventoryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InsufficientStock {
-                requested,
-                available,
-            } => {
-                write!(
-                    f,
-                    "insufficient stock: requested {requested}, available {available}"
-                )
-            }
-        }
-    }
 }
 
 impl Apply<ItemReserved> for InventoryItem {
@@ -120,60 +106,15 @@ impl Handle<RestockItem> for InventoryItem {
 }
 
 // =============================================================================
-// Retry Helper
-// =============================================================================
-
-/// Result type alias for the retry helper.
-type RetryResult<A, S, SS> = Result<
-    usize,
-    OptimisticCommandError<
-        <A as event_sourcing::Aggregate>::Error,
-        <S as event_sourcing::EventStore>::Position,
-        <S as event_sourcing::EventStore>::Error,
-        <<S as event_sourcing::EventStore>::Codec as event_sourcing::Codec>::Error,
-        <SS as event_sourcing::SnapshotStore>::Error,
-    >,
->;
-
-/// Execute a command with automatic retry on concurrency conflicts.
-///
-/// This helper demonstrates a common pattern for handling optimistic concurrency:
-/// when a conflict is detected, simply retry the operation with fresh state.
-fn execute_with_retry<A, C, S, SS>(
-    repo: &mut Repository<S, SS, event_sourcing::Optimistic>,
-    id: &S::Id,
-    command: &C,
-    metadata: &S::Metadata,
-    max_retries: usize,
-) -> RetryResult<A, S, SS>
-where
-    A: event_sourcing::Aggregate<Id = S::Id> + Handle<C>,
-    A::Id: std::fmt::Display,
-    A::Event: event_sourcing::ProjectionEvent + event_sourcing::SerializableEvent + Clone,
-    S: event_sourcing::EventStore,
-    S::Metadata: Clone,
-    SS: event_sourcing::SnapshotStore<Id = S::Id, Position = S::Position>,
-{
-    for attempt in 1..=max_retries {
-        match repo.execute_command::<A, C>(id, command, metadata) {
-            Ok(()) => return Ok(attempt),
-            Err(OptimisticCommandError::Concurrency(conflict)) => {
-                println!(
-                    "     Attempt {attempt}: Conflict! Expected version {:?}, actual {:?}",
-                    conflict.expected, conflict.actual
-                );
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    // Final attempt
-    repo.execute_command::<A, C>(id, command, metadata)
-        .map(|()| max_retries + 1)
-}
-
-// =============================================================================
 // Example Parts
 // =============================================================================
+
+// Type alias using the library-provided RetryResult for cleaner signatures.
+type InventoryRetryResult = RetryResult<
+    InventoryItem,
+    InMemoryEventStore<String, JsonCodec, ()>,
+    event_sourcing::NoSnapshots<String, u64>,
+>;
 
 type OptimisticRepo = Repository<
     InMemoryEventStore<String, JsonCodec, ()>,
@@ -188,7 +129,7 @@ fn part1_basic_usage() -> Result<(OptimisticRepo, String), Box<dyn std::error::E
     println!("PART 1: Basic optimistic concurrency usage\n");
 
     let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
-    let mut repo = Repository::new(store).with_optimistic_concurrency();
+    let mut repo = Repository::new(store); // Optimistic concurrency is the default
 
     let item_id = "SKU-001".to_string();
 
@@ -226,18 +167,12 @@ fn part2_conflict_detection(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("PART 2: Demonstrating conflict detection\n");
 
-    // Simulate a concurrent modification by directly appending to the store
+    // Simulate a concurrent modification by injecting an event
     // This is what would happen if another process/thread modified the aggregate
     println!("3. Simulating concurrent modification (another process reserves 20 units)...");
-    repo.event_store_mut().append(
-        InventoryItem::KIND,
+    repo.inject_concurrent_event::<InventoryItem>(
         item_id,
-        None, // Direct append without version check
-        vec![PersistableEvent {
-            kind: ItemReserved::KIND.to_string(),
-            data: br#"{"quantity":20}"#.to_vec(),
-            metadata: (),
-        }],
+        ItemReserved { quantity: 20 }.into(),
     )?;
 
     let item: InventoryItem = repo.aggregate_builder().load(item_id)?;
@@ -263,13 +198,13 @@ fn part2_conflict_detection(
 
 /// Part 3: Retry pattern for handling conflicts.
 ///
-/// Demonstrates how to use automatic retry logic when conflicts occur.
+/// Demonstrates the built-in `execute_with_retry` method for automatic conflict handling.
 fn part3_retry_pattern() -> Result<(OptimisticRepo, String), Box<dyn std::error::Error>> {
     println!("PART 3: Retry pattern for handling conflicts\n");
 
     // Create a fresh store to demonstrate retry more clearly
     let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
-    let mut repo = Repository::new(store).with_optimistic_concurrency();
+    let mut repo = Repository::new(store); // Optimistic concurrency is the default
     let item_id = "SKU-002".to_string();
 
     // Initialize
@@ -282,26 +217,18 @@ fn part3_retry_pattern() -> Result<(OptimisticRepo, String), Box<dyn std::error:
 
     // Inject a conflict before the retry helper runs
     // In a real system, this might be another service instance
-    repo.event_store_mut().append(
-        InventoryItem::KIND,
+    repo.inject_concurrent_event::<InventoryItem>(
         &item_id,
-        None,
-        vec![PersistableEvent {
-            kind: ItemReserved::KIND.to_string(),
-            data: br#"{"quantity":5}"#.to_vec(),
-            metadata: (),
-        }],
+        ItemReserved { quantity: 5 }.into(),
     )?;
     println!("   Injected concurrent reservation of 5 units (simulating race condition)");
 
-    println!("\n6. Attempting to reserve 10 units with retry logic...");
-    let attempts = execute_with_retry::<InventoryItem, _, _, _>(
-        &mut repo,
-        &item_id,
-        &ReserveItem { quantity: 10 },
-        &(),
-        3,
-    )?;
+    // Use the built-in execute_with_retry method.
+    // This automatically reloads and retries on ConcurrencyConflict errors.
+    println!("\n6. Attempting to reserve 10 units with execute_with_retry...");
+    let attempts: InventoryRetryResult =
+        repo.execute_with_retry::<InventoryItem, _>(&item_id, &ReserveItem { quantity: 10 }, &(), 3);
+    let attempts = attempts?;
     println!("   Succeeded on attempt {attempts}");
 
     let item: InventoryItem = repo.aggregate_builder().load(&item_id)?;
@@ -346,13 +273,13 @@ fn part4_business_rules(repo: &mut OptimisticRepo, item_id: &String) {
 fn print_summary() {
     println!("\n=== Example Complete ===");
     println!("\nKey takeaways:");
-    println!("  1. Enable optimistic concurrency: repo.with_optimistic_concurrency()");
+    println!("  1. Optimistic concurrency is enabled by default");
     println!("  2. Conflicts are detected when the stream version changes between load and commit");
-    println!("  3. Handle OptimisticCommandError::Concurrency to implement retry logic");
+    println!("  3. Use execute_with_retry() for automatic retry on ConcurrencyConflict");
     println!(
         "  4. Business rules are always evaluated against fresh state after conflict resolution"
     );
-    println!("  5. Without optimistic concurrency (default), last-writer-wins semantics apply");
+    println!("  5. Use .without_concurrency_checking() for single-writer scenarios");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

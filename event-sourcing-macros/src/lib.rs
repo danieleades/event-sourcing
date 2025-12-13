@@ -141,20 +141,15 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
                 kind: &str,
                 data: &[u8],
                 codec: &C,
-            ) -> Result<Self, C::Error> {
+            ) -> Result<Self, ::event_sourcing::EventDecodeError<C::Error>> {
                 match kind {
-                    #(#event_types::KIND => Ok(Self::#variant_names(codec.deserialize(data)?)),)*
-                    unknown => {
-                        // Return a codec error instead of panicking.
-                        // We trigger an error by attempting to deserialize invalid JSON
-                        // that contains an informative message about the unknown kind.
-                        let error_json = ::std::format!(
-                            r#"{{"__event_sourcing_unknown_kind":"{}"}}"#,
-                            unknown
-                        );
-                        codec.deserialize::<()>(error_json.as_bytes())
-                            .map(|_| unreachable!("deserializing into () should always fail"))
-                    }
+                    #(#event_types::KIND => Ok(Self::#variant_names(
+                        codec.deserialize(data).map_err(::event_sourcing::EventDecodeError::Codec)?
+                    )),)*
+                    _ => Err(::event_sourcing::EventDecodeError::UnknownKind {
+                        kind: kind.to_string(),
+                        expected: Self::EVENT_KINDS,
+                    }),
                 }
             }
         }

@@ -10,23 +10,31 @@ mod snapshot;
 mod store;
 
 pub use aggregate::{Aggregate, AggregateBuilder, Apply, Handle};
-pub use codec::{Codec, ProjectionEvent, SerializableEvent};
+pub use codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
 pub use concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked};
 pub use event::DomainEvent;
 pub use projection::{ApplyProjection, Projection, ProjectionBuilder, ProjectionError};
-pub use repository::{CommandError, OptimisticCommandError, Repository};
+pub use repository::{
+    CommandError, OptimisticCommandError, OptimisticCommandResult, Repository, RetryResult,
+    UncheckedCommandResult,
+};
 pub use snapshot::{InMemorySnapshotStore, NoSnapshots, Snapshot, SnapshotStore};
 pub use store::{
     AppendError, EventFilter, EventStore, InMemoryError, InMemoryEventStore, JsonCodec,
     LoadEventsResult, PersistableEvent, StoredEvent, Transaction,
 };
 
+// Test utilities module: public when feature enabled, internal for crate tests
 #[cfg(feature = "test-util")]
 pub mod test;
+
+#[cfg(all(test, not(feature = "test-util")))]
+pub(crate) mod test;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test::RepositoryTestExt;
     use serde::Serialize;
     use std::collections::HashMap;
 
@@ -86,17 +94,18 @@ mod tests {
             kind: &str,
             data: &[u8],
             codec: &C,
-        ) -> Result<Self, C::Error> {
+        ) -> Result<Self, EventDecodeError<C::Error>> {
             match kind {
-                "value-added" => Ok(Self::Added(codec.deserialize(data)?)),
-                "value-subtracted" => Ok(Self::Subtracted(codec.deserialize(data)?)),
-                unknown => {
-                    // Return a codec error instead of panicking
-                    let error_json = format!(r#"{{"__event_sourcing_unknown_kind":"{unknown}"}}"#,);
-                    codec
-                        .deserialize::<()>(error_json.as_bytes())
-                        .map(|()| unreachable!("deserializing into () should always fail"))
-                }
+                "value-added" => Ok(Self::Added(
+                    codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+                )),
+                "value-subtracted" => Ok(Self::Subtracted(
+                    codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+                )),
+                _ => Err(EventDecodeError::UnknownKind {
+                    kind: kind.to_string(),
+                    expected: Self::EVENT_KINDS,
+                }),
             }
         }
     }
@@ -497,6 +506,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg_attr(debug_assertions, should_panic(expected = "dropped with"))]
         fn drop_discards_uncommitted_events() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
@@ -505,9 +515,10 @@ mod tests {
                 let mut tx = store.begin::<Unchecked>("counter", "c1".to_string(), None);
                 tx.append(CounterEvent::Added(ValueAdded { amount: 10 }), ())
                     .unwrap();
-                // tx dropped without commit
+                // tx dropped without commit - panics in debug mode
             }
 
+            // In release mode, events are silently discarded
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
             let events = store.load_events(&filters).unwrap();
             assert!(events.is_empty());
@@ -590,7 +601,7 @@ mod tests {
         }
 
         fn create_repository()
-        -> Repository<InMemoryEventStore<String, JsonCodec, ()>, NoSnapshots<String, u64>> {
+        -> Repository<InMemoryEventStore<String, JsonCodec, ()>, NoSnapshots<String, u64>, Optimistic> {
             Repository::new(InMemoryEventStore::new(JsonCodec))
         }
 
@@ -622,7 +633,7 @@ mod tests {
                 &(),
             );
 
-            assert!(matches!(result, Err(CommandError::Aggregate(_))));
+            assert!(matches!(result, Err(OptimisticCommandError::Aggregate(_))));
         }
 
         #[test]
@@ -727,7 +738,7 @@ mod tests {
                 &(),
             );
 
-            assert!(matches!(result, Err(CommandError::Aggregate(_))));
+            assert!(matches!(result, Err(OptimisticCommandError::Aggregate(_))));
 
             // Subtract 5 (should succeed)
             let result = repo.execute_command::<Counter, SubtractValue>(
@@ -742,7 +753,7 @@ mod tests {
         #[test]
         fn optimistic_repository_detects_conflict() {
             let store = InMemoryEventStore::new(JsonCodec);
-            let mut repo = Repository::new(store).with_optimistic_concurrency();
+            let mut repo = Repository::new(store); // Optimistic concurrency is the default
 
             // Add initial value
             repo.execute_command::<Counter, AddValue>(
@@ -752,19 +763,12 @@ mod tests {
             )
             .unwrap();
 
-            // Simulate conflict by directly appending to store
-            repo.event_store_mut()
-                .append(
-                    "counter",
-                    &"c1".to_string(),
-                    None,
-                    vec![PersistableEvent {
-                        kind: "value-added".to_string(),
-                        data: br#"{"amount":5}"#.to_vec(),
-                        metadata: (),
-                    }],
-                )
-                .unwrap();
+            // Simulate conflict by injecting a concurrent event
+            repo.inject_concurrent_event::<Counter>(
+                &"c1".to_string(),
+                CounterEvent::Added(ValueAdded { amount: 5 }),
+            )
+            .unwrap();
 
             // Now execute command - should detect conflict since we loaded stale data
             // (We need to load first, then have a concurrent write, then try to commit)
@@ -801,11 +805,13 @@ mod tests {
 
         #[test]
         fn projection_error_display_codec() {
-            let error: ProjectionError<io::Error, io::Error> =
-                ProjectionError::Codec(io::Error::new(io::ErrorKind::InvalidData, "bad data"));
+            let error: ProjectionError<io::Error, io::Error> = ProjectionError::Codec {
+                event_kind: "test-event".to_string(),
+                error: io::Error::new(io::ErrorKind::InvalidData, "bad data"),
+            };
 
             let msg = format!("{error}");
-            assert!(msg.contains("failed to decode event"));
+            assert!(msg.contains("failed to decode event kind `test-event`"));
         }
 
         #[test]
@@ -950,19 +956,12 @@ mod tests {
             println!("After repo command: {}", counter.value);
             assert_eq!(counter.value, 100);
 
-            // Now directly append (simulating concurrent writer adding 50)
-            repo.event_store_mut()
-                .append(
-                    "counter",
-                    &"c1".to_string(),
-                    None,
-                    vec![PersistableEvent {
-                        kind: "value-added".to_string(),
-                        data: br#"{"amount":50}"#.to_vec(),
-                        metadata: (),
-                    }],
-                )
-                .unwrap();
+            // Now inject a concurrent event (simulating concurrent writer adding 50)
+            repo.inject_concurrent_event::<Counter>(
+                &"c1".to_string(),
+                CounterEvent::Added(ValueAdded { amount: 50 }),
+            )
+            .unwrap();
 
             // Load aggregate again - should now be 150
             let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();

@@ -14,14 +14,18 @@
 //!     .with_snapshots(InMemorySnapshotStore::every(100));
 //! ```
 //!
-//! ## Optimistic Concurrency
+//! ## Concurrency Control
 //!
-//! By default, repositories use last-writer-wins semantics. To enable
-//! optimistic concurrency control (version checking on writes):
+//! By default, repositories use optimistic concurrency control - they track the
+//! stream version when loading and verify it hasn't changed before appending.
+//! If another writer modified the stream, `execute_command` returns an
+//! [`OptimisticCommandError::Concurrency`] error.
+//!
+//! For single-writer scenarios where concurrency checking is unnecessary:
 //!
 //! ```ignore
 //! let repo = Repository::new(event_store)
-//!     .with_optimistic_concurrency();
+//!     .without_concurrency_checking();
 //! ```
 
 use std::marker::PhantomData;
@@ -82,7 +86,7 @@ where
 }
 
 /// Result type alias for unchecked command execution.
-type UncheckedCommandResult<A, S, SS> = Result<
+pub type UncheckedCommandResult<A, S, SS> = Result<
     (),
     CommandError<
         <A as Aggregate>::Error,
@@ -93,8 +97,23 @@ type UncheckedCommandResult<A, S, SS> = Result<
 >;
 
 /// Result type alias for optimistic command execution.
-type OptimisticCommandResult<A, S, SS> = Result<
+pub type OptimisticCommandResult<A, S, SS> = Result<
     (),
+    OptimisticCommandError<
+        <A as Aggregate>::Error,
+        <S as EventStore>::Position,
+        <S as EventStore>::Error,
+        <<S as EventStore>::Codec as Codec>::Error,
+        <SS as SnapshotStore>::Error,
+    >,
+>;
+
+/// Result type alias for retry operations.
+///
+/// Used with [`Repository::execute_with_retry`] where the success value is the
+/// number of attempts taken (1 = succeeded first try, 2 = one retry, etc.).
+pub type RetryResult<A, S, SS> = Result<
+    usize,
     OptimisticCommandError<
         <A as Aggregate>::Error,
         <S as EventStore>::Position,
@@ -148,11 +167,20 @@ where
     _concurrency: PhantomData<C>,
 }
 
-impl<S> Repository<S, NoSnapshots<S::Id, S::Position>, Unchecked>
+impl<S> Repository<S, NoSnapshots<S::Id, S::Position>, Optimistic>
 where
     S: EventStore,
 {
     /// Create a new repository without snapshot support.
+    ///
+    /// By default, repositories use optimistic concurrency control. This means
+    /// the repository tracks the stream version when loading aggregates and
+    /// verifies it hasn't changed before appending new events. If the version
+    /// changed (another writer appended events), `execute_command` returns
+    /// an [`OptimisticCommandError::Concurrency`] error.
+    ///
+    /// For single-writer scenarios where concurrency checking is unnecessary,
+    /// use [`without_concurrency_checking()`](Self::without_concurrency_checking).
     #[must_use]
     pub const fn new(store: S) -> Self {
         Self {
@@ -172,7 +200,8 @@ where
     /// Add snapshot support to this repository.
     ///
     /// The snapshot store determines both storage and policy for when to create
-    /// snapshots. Use implementations like [`InMemorySnapshotStore::every(100)`]
+    /// snapshots. Use implementations like
+    /// [`InMemorySnapshotStore::every`](crate::InMemorySnapshotStore::every)
     /// to snapshot after every 100 events.
     ///
     /// # Example
@@ -196,10 +225,6 @@ where
     #[must_use]
     pub const fn event_store(&self) -> &S {
         &self.store
-    }
-
-    pub const fn event_store_mut(&mut self) -> &mut S {
-        &mut self.store
     }
 
     /// Access the snapshot store.
@@ -234,6 +259,10 @@ where
     /// Load an aggregate and return both the aggregate and its version.
     ///
     /// This is an internal helper used by `execute_command` implementations.
+    #[tracing::instrument(
+        skip(self, id),
+        fields(aggregate_kind = A::KIND)
+    )]
     fn load_aggregate<A>(&self, id: &S::Id) -> Result<LoadedAggregate<A, S::Position>, LoadError<S>>
     where
         A: Aggregate<Id = S::Id>,
@@ -241,20 +270,35 @@ where
     {
         let codec = self.store.codec();
 
-        // Try to load snapshot (ignore errors from the store - fall back to full replay)
-        let snapshot_result = self.snapshots.load(A::KIND, id).ok().flatten();
+        // Try to load snapshot (log errors but fall back to full replay)
+        let snapshot_result = match self.snapshots.load(A::KIND, id) {
+            Ok(snapshot) => {
+                if snapshot.is_some() {
+                    tracing::debug!("loaded snapshot");
+                }
+                snapshot
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "failed to load snapshot, falling back to full replay"
+                );
+                None
+            }
+        };
 
         // Restore aggregate from snapshot or start fresh
-        let (mut aggregate, snapshot_position) = match snapshot_result {
-            Some(snapshot) => {
-                // Deserialize snapshot using the store's codec
-                // Return an error if deserialization fails - this indicates data corruption
-                let restored: A = codec
-                    .deserialize(&snapshot.data)
-                    .map_err(ProjectionError::SnapshotDeserialize)?;
-                (restored, Some(snapshot.position))
-            }
-            None => (A::default(), None),
+        let (mut aggregate, snapshot_position) = if let Some(snapshot) = snapshot_result {
+            // Deserialize snapshot using the store's codec
+            // Return an error if deserialization fails - this indicates data corruption
+            let restored: A = codec
+                .deserialize(&snapshot.data)
+                .map_err(ProjectionError::SnapshotDeserialize)?;
+            tracing::trace!("deserialized aggregate from snapshot");
+            (restored, Some(snapshot.position))
+        } else {
+            tracing::trace!("starting with default aggregate state");
+            (A::default(), None)
         };
 
         // Build filters for events after snapshot position
@@ -275,11 +319,14 @@ where
             .load_events(&filters)
             .map_err(ProjectionError::Store)?;
 
+        let events_count = events.len();
+        tracing::debug!(events_replayed = events_count, "replaying events");
+
         let mut last_event_position: Option<S::Position> = None;
 
         for stored in &events {
             let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
-                .map_err(ProjectionError::Codec)?;
+                .map_err(ProjectionError::EventDecode)?;
             aggregate.apply(&event);
             last_event_position = Some(stored.position);
         }
@@ -290,6 +337,12 @@ where
         // - If neither, this is a new aggregate (version = None)
         let version = last_event_position.or(snapshot_position);
 
+        tracing::debug!(
+            events_replayed = events_count,
+            has_version = version.is_some(),
+            "aggregate loaded"
+        );
+
         Ok(LoadedAggregate {
             aggregate,
             version,
@@ -298,41 +351,48 @@ where
     }
 }
 
-impl<S, SS> Repository<S, SS, Unchecked>
+impl<S, SS> Repository<S, SS, Optimistic>
 where
     S: EventStore,
     SS: SnapshotStore<Id = S::Id, Position = S::Position>,
 {
-    /// Enable optimistic concurrency control for this repository.
+    /// Disable concurrency checking for this repository.
     ///
-    /// With optimistic concurrency enabled, the repository tracks the stream
-    /// version when loading aggregates and verifies it hasn't changed before
-    /// appending new events. If the version changed, `execute_command` returns
-    /// an [`OptimisticCommandError::Concurrency`] error.
+    /// With concurrency checking disabled, events are appended without
+    /// verifying whether other events were added since loading. This uses
+    /// last-writer-wins semantics.
+    ///
+    /// # When to use
+    ///
+    /// This is appropriate for:
+    /// - Single-writer architectures (actor model, partition-per-writer)
+    /// - Testing and prototyping
+    /// - Domains where last-writer-wins is semantically correct
     ///
     /// # Example
     ///
     /// ```ignore
     /// let repo = Repository::new(InMemoryEventStore::new(JsonCodec))
-    ///     .with_optimistic_concurrency();
+    ///     .without_concurrency_checking();
     ///
-    /// match repo.execute_command::<Account, Deposit>(&id, &cmd, &meta) {
-    ///     Ok(()) => println!("Success"),
-    ///     Err(OptimisticCommandError::Concurrency(c)) => {
-    ///         println!("Conflict detected, retrying...");
-    ///     }
-    ///     Err(e) => return Err(e),
-    /// }
+    /// // Commands will never fail with concurrency errors
+    /// repo.execute_command::<Account, Deposit>(&id, &cmd, &meta)?;
     /// ```
     #[must_use]
-    pub fn with_optimistic_concurrency(self) -> Repository<S, SS, Optimistic> {
+    pub fn without_concurrency_checking(self) -> Repository<S, SS, Unchecked> {
         Repository {
             store: self.store,
             snapshots: self.snapshots,
             _concurrency: PhantomData,
         }
     }
+}
 
+impl<S, SS> Repository<S, SS, Unchecked>
+where
+    S: EventStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+{
     /// Execute a command on an aggregate instance.
     ///
     /// The aggregate is loaded from the event store (optionally using a snapshot),
@@ -360,6 +420,10 @@ where
     ///
     /// Panics if `stream_version` returns `None` after successfully appending events.
     /// This indicates a bug in the event store implementation.
+    #[tracing::instrument(
+        skip(self, id, command, metadata),
+        fields(aggregate_kind = A::KIND)
+    )]
     pub fn execute_command<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -377,13 +441,22 @@ where
             .map_err(CommandError::Projection)?;
 
         // Handle the command
-        let new_events =
-            Handle::<Cmd>::handle(&aggregate, command).map_err(CommandError::Aggregate)?;
+        tracing::trace!("handling command");
+        let new_events = match Handle::<Cmd>::handle(&aggregate, command) {
+            Ok(events) => events,
+            Err(e) => {
+                tracing::debug!("command rejected by aggregate");
+                return Err(CommandError::Aggregate(e));
+            }
+        };
 
         let events_count = new_events.len();
         if events_count == 0 {
+            tracing::debug!("command produced no events");
             return Ok(());
         }
+
+        tracing::debug!(events_produced = events_count, "command handled");
 
         // Begin transaction and append events (no version checking)
         let mut tx = self.store.begin::<Unchecked>(A::KIND, id.clone(), None);
@@ -420,6 +493,7 @@ where
             .offer_snapshot(A::KIND, id, snapshot, events_count as u64)
             .map_err(CommandError::Snapshot)?;
 
+        tracing::info!(events_persisted = events_count, "command executed");
         Ok(())
     }
 }
@@ -470,6 +544,10 @@ where
     ///     }
     /// }
     /// ```
+    #[tracing::instrument(
+        skip(self, id, command, metadata),
+        fields(aggregate_kind = A::KIND)
+    )]
     pub fn execute_command<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -489,13 +567,22 @@ where
             .map_err(OptimisticCommandError::Projection)?;
 
         // Handle the command
-        let new_events = Handle::<Cmd>::handle(&aggregate, command)
-            .map_err(OptimisticCommandError::Aggregate)?;
+        tracing::trace!("handling command");
+        let new_events = match Handle::<Cmd>::handle(&aggregate, command) {
+            Ok(events) => events,
+            Err(e) => {
+                tracing::debug!("command rejected by aggregate");
+                return Err(OptimisticCommandError::Aggregate(e));
+            }
+        };
 
         let events_count = new_events.len();
         if events_count == 0 {
+            tracing::debug!("command produced no events");
             return Ok(());
         }
+
+        tracing::debug!(events_produced = events_count, "command handled");
 
         // Begin transaction with expected version for optimistic concurrency
         // version=None means "expect new aggregate" (will be checked by append_new)
@@ -507,10 +594,19 @@ where
         }
 
         // Commit transaction with version checking
-        tx.commit().map_err(|e| match e {
-            AppendError::Conflict(c) => OptimisticCommandError::Concurrency(c),
-            AppendError::Store(s) => OptimisticCommandError::Store(s),
-        })?;
+        if let Err(e) = tx.commit() {
+            match e {
+                AppendError::Conflict(c) => {
+                    tracing::debug!(
+                        expected = ?c.expected,
+                        actual = ?c.actual,
+                        "concurrency conflict detected"
+                    );
+                    return Err(OptimisticCommandError::Concurrency(c));
+                }
+                AppendError::Store(s) => return Err(OptimisticCommandError::Store(s)),
+            }
+        }
 
         // Get the new stream position after commit for snapshot
         let new_position = self
@@ -538,6 +634,58 @@ where
             .offer_snapshot(A::KIND, id, snapshot, events_count as u64)
             .map_err(OptimisticCommandError::Snapshot)?;
 
+        tracing::info!(events_persisted = events_count, "command executed");
         Ok(())
+    }
+
+    /// Execute a command with automatic retry on concurrency conflicts.
+    ///
+    /// When a [`OptimisticCommandError::Concurrency`] error occurs, the command is
+    /// retried with fresh aggregate state up to `max_retries` times. Other errors
+    /// are returned immediately without retry.
+    ///
+    /// Returns the number of attempts taken (1 = succeeded first try, 2 = one retry, etc.)
+    /// on success, or the last error if all retries are exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OptimisticCommandError`] if:
+    /// - The aggregate rejects the command
+    /// - Events cannot be serialized
+    /// - Another writer modified the stream and all retries are exhausted
+    /// - The store fails to persist events
+    /// - The snapshot store fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// match repo.execute_with_retry::<Account, Deposit>(&id, &cmd, &meta, 3) {
+    ///     Ok(attempts) => println!("Succeeded after {attempts} attempt(s)"),
+    ///     Err(e) => eprintln!("Failed after retries: {e}"),
+    /// }
+    /// ```
+    #[allow(clippy::type_complexity)]
+    pub fn execute_with_retry<A, Cmd>(
+        &mut self,
+        id: &S::Id,
+        command: &Cmd,
+        metadata: &S::Metadata,
+        max_retries: usize,
+    ) -> Result<usize, OptimisticCommandError<A::Error, S::Position, S::Error, <S::Codec as Codec>::Error, SS::Error>>
+    where
+        A: Aggregate<Id = S::Id> + Handle<Cmd>,
+        A::Event: ProjectionEvent + SerializableEvent + Clone,
+        S::Metadata: Clone,
+    {
+        for attempt in 1..=max_retries {
+            match self.execute_command::<A, Cmd>(id, command, metadata) {
+                Ok(()) => return Ok(attempt),
+                Err(OptimisticCommandError::Concurrency(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        // Final attempt after retries exhausted
+        self.execute_command::<A, Cmd>(id, command, metadata)
+            .map(|()| max_retries + 1)
     }
 }

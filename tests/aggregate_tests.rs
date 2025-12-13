@@ -5,7 +5,8 @@
 mod with_test_util {
     use event_sourcing::test::TestFramework;
     use event_sourcing::{
-        Aggregate, Codec, DomainEvent, Handle, PersistableEvent, ProjectionEvent, SerializableEvent,
+        Aggregate, Codec, DomainEvent, EventDecodeError, Handle, PersistableEvent, ProjectionEvent,
+        SerializableEvent,
     };
     use serde::{Deserialize, Serialize};
 
@@ -80,12 +81,25 @@ mod with_test_util {
             MoneyWithdrawn::KIND,
         ];
 
-        fn from_stored<C: Codec>(kind: &str, data: &[u8], codec: &C) -> Result<Self, C::Error> {
+        fn from_stored<C: Codec>(
+            kind: &str,
+            data: &[u8],
+            codec: &C,
+        ) -> Result<Self, EventDecodeError<C::Error>> {
             match kind {
-                "account-opened" => Ok(Self::Opened(codec.deserialize(data)?)),
-                "money-deposited" => Ok(Self::Deposited(codec.deserialize(data)?)),
-                "money-withdrawn" => Ok(Self::Withdrawn(codec.deserialize(data)?)),
-                _ => panic!("Unknown event kind: {kind}"),
+                "account-opened" => Ok(Self::Opened(
+                    codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+                )),
+                "money-deposited" => Ok(Self::Deposited(
+                    codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+                )),
+                "money-withdrawn" => Ok(Self::Withdrawn(
+                    codec.deserialize(data).map_err(EventDecodeError::Codec)?,
+                )),
+                _ => Err(EventDecodeError::UnknownKind {
+                    kind: kind.to_string(),
+                    expected: Self::EVENT_KINDS,
+                }),
             }
         }
     }

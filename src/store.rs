@@ -170,6 +170,7 @@ impl<'a, S: EventStore, C: ConcurrencyStrategy> Transaction<'a, S, C> {
         E: SerializableEvent,
     {
         let persistable = event.to_persistable(self.store.codec(), metadata)?;
+        tracing::trace!(event_kind = %persistable.kind, "event appended to transaction");
         self.events.push(persistable);
         Ok(())
     }
@@ -185,6 +186,12 @@ impl<S: EventStore> Transaction<'_, S, Unchecked> {
     /// Returns a store error if persistence fails.
     pub fn commit(mut self) -> Result<(), S::Error> {
         let events = std::mem::take(&mut self.events);
+        let event_count = events.len();
+        tracing::debug!(
+            aggregate_kind = %self.aggregate_kind,
+            event_count,
+            "committing transaction (unchecked)"
+        );
         self.committed = true;
         self.store
             .append(&self.aggregate_kind, &self.aggregate_id, None, events)
@@ -211,6 +218,13 @@ impl<S: EventStore> Transaction<'_, S, Optimistic> {
     /// or [`AppendError::Store`] if persistence fails.
     pub fn commit(mut self) -> Result<(), AppendError<S::Position, S::Error>> {
         let events = std::mem::take(&mut self.events);
+        let event_count = events.len();
+        tracing::debug!(
+            aggregate_kind = %self.aggregate_kind,
+            event_count,
+            expected_version = ?self.expected_version,
+            "committing transaction (optimistic)"
+        );
         self.committed = true;
 
         match self.expected_version {
@@ -237,6 +251,12 @@ impl<S: EventStore, C: ConcurrencyStrategy> Drop for Transaction<'_, S, C> {
         // Silently discard uncommitted events (rollback).
         // This allows codec/validation errors during append() to be handled gracefully
         // without panicking. The events were never persisted, so this is safe.
+        debug_assert!(
+            self.committed || self.events.is_empty(),
+            "Transaction for {} dropped with {} uncommitted events",
+            self.aggregate_kind,
+            self.events.len()
+        );
     }
 }
 
@@ -417,16 +437,19 @@ where
         &self.codec
     }
 
+    #[tracing::instrument(skip(self, aggregate_id))]
     fn stream_version(
         &self,
         aggregate_kind: &str,
         aggregate_id: &Self::Id,
     ) -> Result<Option<u64>, Self::Error> {
         let stream_key = format!("{aggregate_kind}::{aggregate_id}");
-        Ok(self
+        let version = self
             .streams
             .get(&stream_key)
-            .and_then(|s| s.last().map(|e| e.position)))
+            .and_then(|s| s.last().map(|e| e.position));
+        tracing::trace!(?version, "retrieved stream version");
+        Ok(version)
     }
 
     fn begin<Conc: ConcurrencyStrategy>(
@@ -443,6 +466,7 @@ where
         )
     }
 
+    #[tracing::instrument(skip(self, aggregate_id, events), fields(event_count = events.len()))]
     fn append(
         &mut self,
         aggregate_kind: &str,
@@ -450,12 +474,19 @@ where
         expected_version: Option<u64>,
         events: Vec<PersistableEvent<Self::Metadata>>,
     ) -> Result<(), AppendError<u64, Self::Error>> {
+        let event_count = events.len();
+
         // Check version if provided
         if let Some(expected) = expected_version {
             let current = self
                 .stream_version(aggregate_kind, aggregate_id)
                 .map_err(AppendError::store)?;
             if current != Some(expected) {
+                tracing::debug!(
+                    ?expected,
+                    ?current,
+                    "version mismatch, rejecting append"
+                );
                 return Err(ConcurrencyConflict {
                     expected: Some(expected),
                     actual: current,
@@ -482,15 +513,19 @@ where
             .collect();
 
         self.streams.entry(stream_key).or_default().extend(stored);
+        tracing::debug!(events_appended = event_count, "events appended to stream");
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, aggregate_id, events), fields(event_count = events.len()))]
     fn append_expecting_new(
         &mut self,
         aggregate_kind: &str,
         aggregate_id: &Self::Id,
         events: Vec<PersistableEvent<Self::Metadata>>,
     ) -> Result<(), AppendError<u64, Self::Error>> {
+        let event_count = events.len();
+
         // Check that stream is empty (new aggregate)
         let current = self
             .stream_version(aggregate_kind, aggregate_id)
@@ -498,6 +533,10 @@ where
 
         if let Some(actual) = current {
             // Stream already has events - conflict!
+            tracing::debug!(
+                ?actual,
+                "stream already exists, rejecting new aggregate append"
+            );
             return Err(ConcurrencyConflict {
                 expected: None, // "expected new stream"
                 actual: Some(actual),
@@ -524,9 +563,14 @@ where
             .collect();
 
         self.streams.entry(stream_key).or_default().extend(stored);
+        tracing::debug!(
+            events_appended = event_count,
+            "new stream created with events"
+        );
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, filters), fields(filter_count = filters.len()))]
     fn load_events(
         &self,
         filters: &[EventFilter<Self::Id, Self::Position>],
@@ -604,6 +648,7 @@ where
         // Sort by position for chronological ordering across streams
         result.sort_by_key(|event| event.position);
 
+        tracing::debug!(events_loaded = result.len(), "loaded events from store");
         Ok(result)
     }
 }

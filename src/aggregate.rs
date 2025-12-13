@@ -154,7 +154,7 @@ where
         for stored in events {
             // Sum type deserializes itself
             let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
-                .map_err(ProjectionError::Codec)?;
+                .map_err(ProjectionError::EventDecode)?;
             aggregate.apply(&event);
         }
 

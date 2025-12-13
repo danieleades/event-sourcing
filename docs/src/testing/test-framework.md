@@ -1,6 +1,13 @@
 # Test Framework
 
-The crate provides a `TestFramework` for testing aggregates in isolation using the Given-When-Then pattern. No stores, no serialization—just pure domain logic.
+The crate provides two testing utilities:
+
+- **`TestFramework`**: Unit testing aggregates in isolation (no stores, no serialization)
+- **`RepositoryTestExt`**: Integration testing with real repositories (seeding data, simulating concurrency)
+
+## Unit Testing with TestFramework
+
+`TestFramework` tests aggregates in isolation using the Given-When-Then pattern. No stores, no serialization—just pure domain logic.
 
 ## Enabling the Test Framework
 

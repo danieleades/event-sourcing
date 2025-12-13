@@ -4,22 +4,31 @@ When multiple processes or threads write to the same aggregate simultaneously, y
 losing updates. Optimistic concurrency control detects these conflicts by checking that
 the stream version hasn't changed between loading the aggregate and committing new events.
 
-## Enabling Optimistic Concurrency
+## Default Behavior
 
-By default, repositories use **last-writer-wins** semantics—no version checking is
-performed. To enable optimistic concurrency, call `with_optimistic_concurrency()`:
+By default, repositories use **optimistic concurrency**—version checking is performed on
+every write. This is the safe default for production systems.
 
 ```rust,ignore
 use event_sourcing::{Repository, InMemoryEventStore, JsonCodec};
 
-let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
-let mut repo = Repository::new(store)
-    .with_optimistic_concurrency();
+let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+let mut repo = Repository::new(store); // Optimistic concurrency enabled
 ```
 
-This returns a `Repository<S, SS, Optimistic>` instead of `Repository<S, SS, Unchecked>`.
 The concurrency strategy is encoded in the type system, so you get compile-time guarantees
 about which error types you need to handle.
+
+## Disabling Concurrency Checking
+
+For single-writer scenarios where concurrency checking is unnecessary, you can opt out:
+
+```rust,ignore
+let mut repo = Repository::new(store)
+    .without_concurrency_checking();
+```
+
+This returns a `Repository<S, SS, Unchecked>` which uses last-writer-wins semantics.
 
 ## Error Types
 
@@ -27,8 +36,8 @@ The two concurrency strategies use different error types:
 
 | Strategy | Error Type | Includes Concurrency Variant? |
 |----------|------------|-------------------------------|
-| `Unchecked` (default) | `CommandError` | No |
-| `Optimistic` | `OptimisticCommandError` | Yes |
+| `Optimistic` (default) | `OptimisticCommandError` | Yes |
+| `Unchecked` | `CommandError` | No |
 
 When using optimistic concurrency, `execute_command` returns
 `OptimisticCommandError::Concurrency(conflict)` if the stream version changed between
