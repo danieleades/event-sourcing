@@ -258,6 +258,17 @@ where
         AggregateBuilder::new(self)
     }
 
+    pub(crate) fn load_aggregate_state<A>(
+        &self,
+        id: &S::Id,
+    ) -> Result<A, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
+    where
+        A: Aggregate<Id = S::Id>,
+        A::Event: ProjectionEvent,
+    {
+        self.load_aggregate::<A>(id).map(|loaded| loaded.aggregate)
+    }
+
     /// Load an aggregate and return both the aggregate and its version.
     ///
     /// This is an internal helper used by `execute_command` implementations.

@@ -16,7 +16,7 @@ use crate::{
     projection::ProjectionError,
     repository::Repository,
     snapshot::SnapshotStore,
-    store::{EventFilter, EventStore},
+    store::EventStore,
 };
 
 /// Command-side entities that produce domain events.
@@ -136,28 +136,6 @@ where
     where
         A::Event: ProjectionEvent,
     {
-        // Build filters for all event kinds for this specific aggregate
-        let filters: Vec<EventFilter<S::Id, S::Position>> = A::Event::EVENT_KINDS
-            .iter()
-            .map(|kind| EventFilter::for_aggregate(*kind, A::KIND, id.clone()))
-            .collect();
-
-        let events = self
-            .repository
-            .store
-            .load_events(&filters)
-            .map_err(ProjectionError::Store)?;
-        let codec = self.repository.store.codec();
-
-        let mut aggregate = A::default();
-
-        for stored in events {
-            // Sum type deserializes itself
-            let event = A::Event::from_stored(&stored.kind, &stored.data, codec)
-                .map_err(ProjectionError::EventDecode)?;
-            aggregate.apply(&event);
-        }
-
-        Ok(aggregate)
+        self.repository.load_aggregate_state::<A>(id)
     }
 }

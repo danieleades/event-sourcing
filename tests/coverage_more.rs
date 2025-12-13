@@ -1,6 +1,8 @@
 #![cfg(feature = "test-util")]
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::convert::Infallible;
 
 use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
 use event_sourcing::snapshot::{Snapshot, SnapshotStore};
@@ -420,4 +422,54 @@ fn optimistic_execute_with_retry_surfaces_non_concurrency_errors() {
         .unwrap_err();
 
     assert!(matches!(err, OptimisticCommandError::Aggregate(_)));
+}
+
+#[derive(Debug)]
+struct TrackingSnapshotStore {
+    load_called: Cell<bool>,
+}
+
+impl TrackingSnapshotStore {
+    const fn new() -> Self {
+        Self {
+            load_called: Cell::new(false),
+        }
+    }
+
+    const fn load_called(&self) -> bool {
+        self.load_called.get()
+    }
+}
+
+impl SnapshotStore for TrackingSnapshotStore {
+    type Id = String;
+    type Position = u64;
+    type Error = Infallible;
+
+    fn load(&self, _: &str, _: &Self::Id) -> Result<Option<Snapshot<Self::Position>>, Self::Error> {
+        self.load_called.set(true);
+        Ok(None)
+    }
+
+    fn offer_snapshot(
+        &mut self,
+        _: &str,
+        _: &Self::Id,
+        _: Snapshot<Self::Position>,
+        _: u64,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn aggregate_builder_load_consults_snapshot_store() {
+    let store = InMemoryEventStore::<String, _, ()>::new(JsonCodec);
+    let snapshots = TrackingSnapshotStore::new();
+    let repo = Repository::new(store).with_snapshots(snapshots);
+
+    let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();
+
+    assert_eq!(counter.value, 0);
+    assert!(repo.snapshot_store().load_called());
 }
