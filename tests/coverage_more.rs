@@ -9,9 +9,9 @@ use event_sourcing::snapshot::{Snapshot, SnapshotStore};
 use event_sourcing::store::{EventStore, PersistableEvent};
 use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{
-    Aggregate, ApplyProjection, CommandError, ConcurrencyConflict, DomainEvent, Handle,
-    InMemoryEventStore, InMemorySnapshotStore, JsonCodec, OptimisticCommandError, Projection,
-    ProjectionError, Repository,
+    Aggregate, ApplyProjection, ConcurrencyConflict, DomainEvent, Handle, InMemoryEventStore,
+    InMemorySnapshotStore, JsonCodec, OptimisticCommandError, Projection, ProjectionError,
+    Repository, SnapshotCommandError,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -160,6 +160,8 @@ fn in_memory_snapshot_store_policy_always_saves() {
     let mut snapshots = InMemorySnapshotStore::<String, u64>::always();
     let id = "c1".to_string();
 
+    assert!(snapshots.should_snapshot(Counter::KIND, &id, 0));
+
     snapshots
         .offer_snapshot(
             Counter::KIND,
@@ -181,19 +183,10 @@ fn in_memory_snapshot_store_policy_every_n_events_saves_at_threshold() {
     let mut snapshots = InMemorySnapshotStore::<String, u64>::every(3);
     let id = "c1".to_string();
 
-    snapshots
-        .offer_snapshot(
-            Counter::KIND,
-            &id,
-            Snapshot {
-                position: 1,
-                data: vec![1],
-            },
-            2,
-        )
-        .unwrap();
+    assert!(!snapshots.should_snapshot(Counter::KIND, &id, 2));
     assert!(snapshots.load(Counter::KIND, &id).unwrap().is_none());
 
+    assert!(snapshots.should_snapshot(Counter::KIND, &id, 3));
     snapshots
         .offer_snapshot(
             Counter::KIND,
@@ -210,20 +203,10 @@ fn in_memory_snapshot_store_policy_every_n_events_saves_at_threshold() {
 
 #[test]
 fn in_memory_snapshot_store_policy_never_does_not_save() {
-    let mut snapshots = InMemorySnapshotStore::<String, u64>::never();
+    let snapshots = InMemorySnapshotStore::<String, u64>::never();
     let id = "c1".to_string();
 
-    snapshots
-        .offer_snapshot(
-            Counter::KIND,
-            &id,
-            Snapshot {
-                position: 1,
-                data: vec![1],
-            },
-            100,
-        )
-        .unwrap();
+    assert!(!snapshots.should_snapshot(Counter::KIND, &id, 100));
 
     assert!(snapshots.load(Counter::KIND, &id).unwrap().is_none());
 }
@@ -343,6 +326,10 @@ impl SnapshotStore for FailingLoadSnapshotStore {
     ) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
+        false
+    }
 }
 
 #[test]
@@ -384,6 +371,10 @@ impl SnapshotStore for CorruptSnapshotStore {
     ) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
+        false
+    }
 }
 
 #[test]
@@ -397,7 +388,7 @@ fn corrupt_snapshot_data_returns_projection_error() {
         .execute_command::<Counter, AddValue>(&"c1".to_string(), &AddValue { amount: 1 }, &())
         .unwrap_err();
 
-    assert!(matches!(err, CommandError::Projection(_)));
+    assert!(matches!(err, SnapshotCommandError::Projection(_)));
 }
 
 #[test]
@@ -459,6 +450,10 @@ impl SnapshotStore for TrackingSnapshotStore {
         _: u64,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
+        false
     }
 }
 

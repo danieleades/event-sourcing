@@ -110,17 +110,9 @@ impl Handle<RestockItem> for InventoryItem {
 // =============================================================================
 
 // Type alias using the library-provided RetryResult for cleaner signatures.
-type InventoryRetryResult = RetryResult<
-    InventoryItem,
-    InMemoryEventStore<String, JsonCodec, ()>,
-    event_sourcing::NoSnapshots<String, u64>,
->;
+type InventoryRetryResult = RetryResult<InventoryItem, InMemoryEventStore<String, JsonCodec, ()>>;
 
-type OptimisticRepo = Repository<
-    InMemoryEventStore<String, JsonCodec, ()>,
-    event_sourcing::NoSnapshots<String, u64>,
-    event_sourcing::Optimistic,
->;
+type OptimisticRepo = Repository<InMemoryEventStore<String, JsonCodec, ()>>;
 
 /// Part 1: Basic optimistic concurrency usage.
 ///

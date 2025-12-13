@@ -28,7 +28,7 @@ let mut repo = Repository::new(store)
     .without_concurrency_checking();
 ```
 
-This returns a `Repository<S, SS, Unchecked>` which uses last-writer-wins semantics.
+This returns a `Repository<S, Unchecked>` which uses last-writer-wins semantics.
 
 ## Error Types
 
@@ -65,7 +65,7 @@ The most common pattern for handling conflicts is to **retry** the operation:
 
 ```rust,ignore
 fn execute_with_retry<A, C>(
-    repo: &mut Repository<S, SS, Optimistic>,
+    repo: &mut Repository<S, Optimistic>,
     id: &A::Id,
     command: &C,
     metadata: &S::Metadata,

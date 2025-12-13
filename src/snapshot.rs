@@ -5,7 +5,7 @@
 //!
 //! - [`Snapshot`] - Point-in-time aggregate state
 //! - [`SnapshotStore`] - Trait for snapshot persistence with policy
-//! - [`NoSnapshots`] - No-op implementation for backwards compatibility
+//! - [`NoSnapshots`] - No-op implementation (use `Repository` instead if you want no snapshots)
 //! - [`InMemorySnapshotStore`] - Reference implementation with configurable policy
 
 use std::collections::HashMap;
@@ -36,9 +36,9 @@ pub struct Snapshot<Pos> {
 /// Trait for snapshot persistence with built-in policy.
 ///
 /// Implementations decide both *how* to store snapshots and *when* to store them.
-/// The [`offer_snapshot`](SnapshotStore::offer_snapshot) method is called after
-/// every command execution, and the implementation decides whether to actually
-/// persist the snapshot based on its internal policy.
+/// The repository calls [`should_snapshot`](SnapshotStore::should_snapshot) after
+/// each successful command execution to decide whether to serialize and persist
+/// a new snapshot.
 ///
 /// # Example Implementations
 ///
@@ -72,10 +72,21 @@ pub trait SnapshotStore {
         aggregate_id: &Self::Id,
     ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
 
-    /// Offer a snapshot for storage.
+    /// Whether a snapshot should be taken.
     ///
-    /// Called after every command execution. The implementation decides whether
-    /// to actually persist based on its policy (e.g., every N events).
+    /// The repository calls this before serializing aggregate state, so snapshot
+    /// stores can avoid unnecessary serialization cost when a policy declines.
+    #[must_use]
+    fn should_snapshot(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &Self::Id,
+        events_since_last_snapshot: u64,
+    ) -> bool;
+
+    /// Persist a snapshot.
+    ///
+    /// Called after [`should_snapshot`](SnapshotStore::should_snapshot) returned `true`.
     ///
     /// # Arguments
     ///
@@ -137,6 +148,15 @@ impl<Id, Pos> SnapshotStore for NoSnapshots<Id, Pos> {
         _events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn should_snapshot(
+        &self,
+        _aggregate_kind: &str,
+        _aggregate_id: &Self::Id,
+        _events_since_last_snapshot: u64,
+    ) -> bool {
+        false
     }
 }
 
@@ -281,6 +301,15 @@ where
         Ok(snapshot)
     }
 
+    fn should_snapshot(
+        &self,
+        _aggregate_kind: &str,
+        _aggregate_id: &Self::Id,
+        events_since_last_snapshot: u64,
+    ) -> bool {
+        self.policy.should_snapshot(events_since_last_snapshot)
+    }
+
     #[tracing::instrument(skip(self, aggregate_id, snapshot))]
     fn offer_snapshot(
         &mut self,
@@ -289,16 +318,14 @@ where
         snapshot: Snapshot<Pos>,
         events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error> {
-        if self.policy.should_snapshot(events_since_last_snapshot) {
-            let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-            self.snapshots.insert(key, snapshot);
-            tracing::debug!(events_since_last_snapshot, "snapshot saved");
-        } else {
-            tracing::trace!(
-                events_since_last_snapshot,
-                "snapshot offer declined by policy"
-            );
-        }
+        debug_assert!(
+            self.policy.should_snapshot(events_since_last_snapshot),
+            "offer_snapshot called when policy declined"
+        );
+
+        let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
+        self.snapshots.insert(key, snapshot);
+        tracing::debug!(events_since_last_snapshot, "snapshot saved");
         Ok(())
     }
 }

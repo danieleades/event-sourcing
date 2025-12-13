@@ -9,13 +9,15 @@ mod repository;
 pub mod snapshot;
 pub mod store;
 
-pub use aggregate::{Aggregate, AggregateBuilder, Apply, Handle};
+pub use aggregate::{Aggregate, AggregateBuilder, Apply, Handle, SnapshotableAggregate};
 pub use concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked};
 pub use event::DomainEvent;
 pub use projection::{ApplyProjection, Projection, ProjectionBuilder, ProjectionError};
 pub use repository::{
-    CommandError, OptimisticCommandError, OptimisticCommandResult, Repository, RetryResult,
-    UncheckedCommandResult,
+    CommandError, OptimisticCommandError, OptimisticCommandResult, OptimisticSnapshotCommandError,
+    OptimisticSnapshotCommandResult, Repository, RetryResult, SnapshotCommandError,
+    SnapshotRepository, SnapshotRetryResult, UncheckedCommandResult,
+    UncheckedSnapshotCommandResult,
 };
 
 // "Happy path" defaults at the crate root.
@@ -602,11 +604,7 @@ mod tests {
             }
         }
 
-        fn create_repository() -> Repository<
-            InMemoryEventStore<String, JsonCodec, ()>,
-            NoSnapshots<String, u64>,
-            Optimistic,
-        > {
+        fn create_repository() -> Repository<InMemoryEventStore<String, JsonCodec, ()>> {
             Repository::new(InMemoryEventStore::new(JsonCodec))
         }
 
@@ -924,7 +922,7 @@ mod tests {
 
         #[test]
         fn command_error_display_aggregate() {
-            let error: CommandError<String, io::Error, io::Error, io::Error> =
+            let error: CommandError<String, io::Error, io::Error> =
                 CommandError::Aggregate("invalid state".to_string());
 
             let msg = format!("{error}");
@@ -942,8 +940,7 @@ mod tests {
         #[test]
         fn command_error_store_has_source() {
             let inner = io::Error::other("store error");
-            let error: CommandError<String, io::Error, io::Error, io::Error> =
-                CommandError::Store(inner);
+            let error: CommandError<String, io::Error, io::Error> = CommandError::Store(inner);
 
             assert!(error.source().is_some());
         }
@@ -967,7 +964,7 @@ mod tests {
                 expected: Some(1u64),
                 actual: Some(2u64),
             };
-            let error: OptimisticCommandError<String, u64, io::Error, io::Error, io::Error> =
+            let error: OptimisticCommandError<String, u64, io::Error, io::Error> =
                 OptimisticCommandError::Concurrency(conflict);
 
             let msg = format!("{error}");

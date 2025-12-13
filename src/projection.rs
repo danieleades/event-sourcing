@@ -11,10 +11,7 @@ use thiserror::Error;
 use crate::{
     aggregate::Aggregate,
     codec::Codec,
-    concurrency::ConcurrencyStrategy,
     event::DomainEvent,
-    repository::Repository,
-    snapshot::SnapshotStore,
     store::{EventFilter, EventStore, StoredEvent},
 };
 
@@ -78,14 +75,12 @@ type EventHandler<P, S> = Box<
 >;
 
 /// Builder used to configure which events should be loaded for a projection.
-pub struct ProjectionBuilder<'a, S, SS, C, P>
+pub struct ProjectionBuilder<'a, S, P>
 where
     S: EventStore,
-    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
-    C: ConcurrencyStrategy,
     P: Projection,
 {
-    pub(super) repository: &'a Repository<S, SS, C>,
+    pub(super) store: &'a S,
     /// Event kind -> handler mapping for O(1) dispatch
     handlers: HashMap<String, EventHandler<P, S>>,
     /// Filters for loading events from the store
@@ -93,16 +88,14 @@ where
     pub(super) _phantom: PhantomData<P>,
 }
 
-impl<'a, S, SS, C, P> ProjectionBuilder<'a, S, SS, C, P>
+impl<'a, S, P> ProjectionBuilder<'a, S, P>
 where
     S: EventStore,
-    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
-    C: ConcurrencyStrategy,
     P: Projection,
 {
-    pub(super) fn new(repository: &'a Repository<S, SS, C>) -> Self {
+    pub(super) fn new(store: &'a S) -> Self {
         Self {
-            repository,
+            store,
             handlers: HashMap::new(),
             filters: Vec::new(),
             _phantom: PhantomData,
@@ -194,11 +187,10 @@ where
         tracing::debug!("loading projection");
 
         let events = self
-            .repository
             .store
             .load_events(&self.filters)
             .map_err(ProjectionError::Store)?;
-        let codec = self.repository.store.codec();
+        let codec = self.store.codec();
         let mut projection = P::default();
 
         let event_count = events.len();

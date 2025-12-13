@@ -62,9 +62,8 @@ use thiserror::Error;
 
 use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyStrategy, Unchecked};
-use crate::snapshot::SnapshotStore;
 use crate::store::{AppendError, EventStore, PersistableEvent};
-use crate::{Aggregate, Handle, Repository};
+use crate::{Aggregate, Handle, Repository, SnapshotRepository};
 
 // =============================================================================
 // Repository Test Extension Trait
@@ -84,6 +83,9 @@ where
     #[error("failed to persist event: {0}")]
     Store(#[source] StoreError),
 }
+
+type SeedResult<S> =
+    Result<(), SeedError<<S as EventStore>::Error, <<S as EventStore>::Codec as Codec>::Error>>;
 
 /// Extension trait providing test utilities for [`Repository`].
 ///
@@ -110,12 +112,47 @@ where
 ///     ProductEvent::from(ProductRestocked { sku: "SKU-001".into(), quantity: 50 }),
 /// )?;
 /// ```
-pub trait RepositoryTestExt<S, SS, C>
+pub trait StoreAccess {
+    type Store: EventStore;
+
+    fn store(&self) -> &Self::Store;
+    fn store_mut(&mut self) -> &mut Self::Store;
+}
+
+impl<S, C> StoreAccess for Repository<S, C>
 where
     S: EventStore,
-    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
     C: ConcurrencyStrategy,
 {
+    type Store = S;
+
+    fn store(&self) -> &Self::Store {
+        &self.store
+    }
+
+    fn store_mut(&mut self) -> &mut Self::Store {
+        &mut self.store
+    }
+}
+
+impl<S, SS, C> StoreAccess for SnapshotRepository<S, SS, C>
+where
+    S: EventStore,
+    SS: crate::snapshot::SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
+{
+    type Store = S;
+
+    fn store(&self) -> &Self::Store {
+        &self.store
+    }
+
+    fn store_mut(&mut self) -> &mut Self::Store {
+        &mut self.store
+    }
+}
+
+pub trait RepositoryTestExt: StoreAccess {
     /// Seed events for an aggregate, bypassing command handlers.
     ///
     /// Events are serialized through the codec, ensuring they can be loaded
@@ -133,13 +170,24 @@ where
     /// [`SeedError::Store`] if persistence fails.
     fn seed_events<A>(
         &mut self,
-        id: &S::Id,
+        id: &<Self::Store as EventStore>::Id,
         events: Vec<A::Event>,
-    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
+    ) -> SeedResult<Self::Store>
     where
-        A: Aggregate<Id = S::Id>,
+        A: Aggregate<Id = <Self::Store as EventStore>::Id>,
         A::Event: SerializableEvent,
-        S::Metadata: Default;
+        <Self::Store as EventStore>::Metadata: Default,
+    {
+        let store = self.store_mut();
+        let mut tx = store.begin::<Unchecked>(A::KIND, id.clone(), None);
+
+        for event in events {
+            tx.append(event, <Self::Store as EventStore>::Metadata::default())
+                .map_err(SeedError::Codec)?;
+        }
+
+        tx.commit().map_err(SeedError::Store)
+    }
 
     /// Inject a single event as if from a concurrent writer.
     ///
@@ -160,13 +208,31 @@ where
     /// [`SeedError::Store`] if persistence fails.
     fn inject_concurrent_event<A>(
         &mut self,
-        id: &S::Id,
+        id: &<Self::Store as EventStore>::Id,
         event: A::Event,
-    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
+    ) -> SeedResult<Self::Store>
     where
-        A: Aggregate<Id = S::Id>,
+        A: Aggregate<Id = <Self::Store as EventStore>::Id>,
         A::Event: SerializableEvent,
-        S::Metadata: Default;
+        <Self::Store as EventStore>::Metadata: Default,
+    {
+        let store = self.store_mut();
+        let persistable = event
+            .to_persistable(
+                store.codec(),
+                <Self::Store as EventStore>::Metadata::default(),
+            )
+            .map_err(SeedError::Codec)?;
+
+        store
+            .append(A::KIND, id, None, vec![persistable])
+            .map_err(|e| match e {
+                AppendError::Store(e) => SeedError::Store(e),
+                AppendError::Conflict(_) => {
+                    unreachable!("no version check on inject_concurrent_event")
+                }
+            })
+    }
 
     /// Inject a raw event without codec processing.
     ///
@@ -186,68 +252,11 @@ where
     fn inject_raw_event(
         &mut self,
         aggregate_kind: &str,
-        id: &S::Id,
-        event: PersistableEvent<S::Metadata>,
-    ) -> Result<(), S::Error>;
-}
-
-impl<S, SS, C> RepositoryTestExt<S, SS, C> for Repository<S, SS, C>
-where
-    S: EventStore,
-    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
-    C: ConcurrencyStrategy,
-{
-    fn seed_events<A>(
-        &mut self,
-        id: &S::Id,
-        events: Vec<A::Event>,
-    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
-    where
-        A: Aggregate<Id = S::Id>,
-        A::Event: SerializableEvent,
-        S::Metadata: Default,
-    {
-        let mut tx = self.store.begin::<Unchecked>(A::KIND, id.clone(), None);
-
-        for event in events {
-            tx.append(event, S::Metadata::default())
-                .map_err(SeedError::Codec)?;
-        }
-
-        tx.commit().map_err(SeedError::Store)
-    }
-
-    fn inject_concurrent_event<A>(
-        &mut self,
-        id: &S::Id,
-        event: A::Event,
-    ) -> Result<(), SeedError<S::Error, <S::Codec as Codec>::Error>>
-    where
-        A: Aggregate<Id = S::Id>,
-        A::Event: SerializableEvent,
-        S::Metadata: Default,
-    {
-        let persistable = event
-            .to_persistable(self.store.codec(), S::Metadata::default())
-            .map_err(SeedError::Codec)?;
-
-        self.store
-            .append(A::KIND, id, None, vec![persistable])
-            .map_err(|e| match e {
-                AppendError::Store(e) => SeedError::Store(e),
-                AppendError::Conflict(_) => {
-                    unreachable!("no version check on inject_concurrent_event")
-                }
-            })
-    }
-
-    fn inject_raw_event(
-        &mut self,
-        aggregate_kind: &str,
-        id: &S::Id,
-        event: PersistableEvent<S::Metadata>,
-    ) -> Result<(), S::Error> {
-        self.store
+        id: &<Self::Store as EventStore>::Id,
+        event: PersistableEvent<<Self::Store as EventStore>::Metadata>,
+    ) -> Result<(), <Self::Store as EventStore>::Error> {
+        let store = self.store_mut();
+        store
             .append(aggregate_kind, id, None, vec![event])
             .map_err(|e| match e {
                 AppendError::Store(e) => e,
@@ -257,6 +266,8 @@ where
             })
     }
 }
+
+impl<T> RepositoryTestExt for T where T: StoreAccess {}
 
 // =============================================================================
 // Test Framework for Aggregate Unit Testing

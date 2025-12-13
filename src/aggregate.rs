@@ -14,7 +14,7 @@ use crate::{
     codec::{Codec, ProjectionEvent},
     concurrency::ConcurrencyStrategy,
     projection::ProjectionError,
-    repository::Repository,
+    repository::{Repository, SnapshotRepository},
     snapshot::SnapshotStore,
     store::EventStore,
 };
@@ -25,9 +25,11 @@ use crate::{
 /// [`Handle<C>`]. The derive macro generates the event enum and plumbing automatically, while
 /// keeping your state struct focused on domain behaviour.
 ///
-/// Aggregates must be serializable to support snapshotting. Use `#[derive(Serialize, Deserialize)]`
-/// or implement the traits manually. Schema evolution can be handled using `serde_evolve::Versioned`.
-pub trait Aggregate: Default + Sized + Serialize + DeserializeOwned {
+/// Aggregates are domain objects and do not require serialization by default.
+///
+/// If you enable snapshots (via `SnapshotRepository`), the aggregate state must be
+/// serializable; see [`SnapshotableAggregate`].
+pub trait Aggregate: Default + Sized {
     /// Aggregate type identifier used by the event store.
     ///
     /// This is combined with the aggregate ID to create stream identifiers.
@@ -46,6 +48,14 @@ pub trait Aggregate: Default + Sized + Serialize + DeserializeOwned {
     /// For hand-written aggregates, implement this directly with a match expression.
     fn apply(&mut self, event: &Self::Event);
 }
+
+/// Marker trait for aggregates that can be snapshotted.
+///
+/// Snapshot-enabled repositories require aggregates to be serializable so they can
+/// persist point-in-time state.
+pub trait SnapshotableAggregate: Aggregate + Serialize + DeserializeOwned {}
+
+impl<T> SnapshotableAggregate for T where T: Aggregate + Serialize + DeserializeOwned {}
 
 /// Mutate an aggregate with a domain event.
 ///
@@ -96,32 +106,27 @@ pub trait Handle<C>: Aggregate {
 }
 
 /// Builder for loading aggregates by ID.
-pub struct AggregateBuilder<'a, S, SS, C, A>
-where
-    S: EventStore,
-    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
-    C: ConcurrencyStrategy,
-    A: Aggregate,
-{
-    pub(super) repository: &'a Repository<S, SS, C>,
+pub struct AggregateBuilder<'a, R, A> {
+    pub(super) repository: &'a R,
     pub(super) _phantom: PhantomData<A>,
 }
 
-impl<'a, S, SS, C, A> AggregateBuilder<'a, S, SS, C, A>
-where
-    S: EventStore,
-    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
-    C: ConcurrencyStrategy,
-    A: Aggregate<Id = S::Id>,
-{
-    pub(super) const fn new(repository: &'a Repository<S, SS, C>) -> Self {
+impl<'a, R, A> AggregateBuilder<'a, R, A> {
+    pub(super) const fn new(repository: &'a R) -> Self {
         Self {
             repository,
             _phantom: PhantomData,
         }
     }
+}
 
-    /// Load the aggregate instance.
+impl<S, C, A> AggregateBuilder<'_, Repository<S, C>, A>
+where
+    S: EventStore,
+    C: ConcurrencyStrategy,
+    A: Aggregate<Id = S::Id>,
+{
+    /// Load the aggregate instance by replaying events (no snapshots).
     ///
     /// The event kinds to load are automatically determined from the
     /// aggregate's event type via `ProjectionEvent::EVENT_KINDS`.
@@ -136,6 +141,33 @@ where
     where
         A::Event: ProjectionEvent,
     {
-        self.repository.load_aggregate_state::<A>(id)
+        self.repository.load::<A>(id)
+    }
+}
+
+impl<S, SS, C, A> AggregateBuilder<'_, SnapshotRepository<S, SS, C>, A>
+where
+    S: EventStore,
+    SS: SnapshotStore<Id = S::Id, Position = S::Position>,
+    C: ConcurrencyStrategy,
+    A: SnapshotableAggregate<Id = S::Id>,
+{
+    /// Load the aggregate instance using snapshots when available.
+    ///
+    /// The event kinds to load are automatically determined from the
+    /// aggregate's event type via `ProjectionEvent::EVENT_KINDS`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if events cannot be deserialized or a stored snapshot cannot
+    /// be deserialized (which indicates snapshot data corruption).
+    pub fn load(
+        self,
+        id: &S::Id,
+    ) -> Result<A, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
+    where
+        A::Event: ProjectionEvent,
+    {
+        self.repository.load::<A>(id)
     }
 }

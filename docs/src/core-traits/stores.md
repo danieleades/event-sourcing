@@ -6,8 +6,11 @@ The crate separates storage concerns into three traits: `EventStore` for event p
 
 ```rust,ignore
 pub trait EventStore {
+    /// Aggregate identifier type.
+    type Id: Clone;
+
     /// Position type for ordering (e.g., `u64` for global sequence, `()` for unordered)
-    type Position;
+    type Position: Copy + PartialEq + std::fmt::Debug;
 
     /// Store-specific error type
     type Error: std::error::Error;
@@ -18,13 +21,29 @@ pub trait EventStore {
     /// Metadata type attached to events
     type Metadata;
 
-    /// Begin a write transaction
-    fn begin(&mut self, aggregate_kind: &str, aggregate_id: &str)
-        -> Transaction<'_, Self>;
+    fn codec(&self) -> &Self::Codec;
 
-    /// Load events matching the given filters
-    fn load_events(&self, filters: &[EventFilter<Self::Position>])
-        -> Result<Vec<StoredEvent<Self::Position, Self::Metadata>>, Self::Error>;
+    fn stream_version(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &Self::Id,
+    ) -> Result<Option<Self::Position>, Self::Error>;
+
+    /// Begin a write transaction with a chosen concurrency strategy.
+    fn begin<C: ConcurrencyStrategy>(
+        &mut self,
+        aggregate_kind: &str,
+        aggregate_id: Self::Id,
+        expected_version: Option<Self::Position>,
+    ) -> Transaction<'_, Self, C>
+    where
+        Self: Sized;
+
+    /// Load events matching the given filters.
+    fn load_events(
+        &self,
+        filters: &[EventFilter<Self::Id, Self::Position>],
+    ) -> Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error>;
 }
 ```
 
@@ -36,15 +55,14 @@ For testing and prototyping:
 use event_sourcing::{InMemoryEventStore, JsonCodec};
 
 // With unit metadata
-let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
 
 // With custom metadata
-let store: InMemoryEventStore<JsonCodec, MyMetadata> = InMemoryEventStore::new(JsonCodec);
+let store: InMemoryEventStore<String, JsonCodec, MyMetadata> = InMemoryEventStore::new(JsonCodec);
 ```
 
 Features:
 - Uses `u64` positions (global sequence number)
-- Thread-safe via internal mutability
 - Events stored in memory (lost on drop)
 - Deduplicates overlapping filters when loading
 
@@ -53,7 +71,9 @@ Features:
 Events are appended within a transaction for atomicity:
 
 ```rust,ignore
-let mut tx = store.begin("account", "ACC-001");
+use event_sourcing::Unchecked;
+
+let mut tx = store.begin::<Unchecked>("account", "ACC-001".to_string(), None);
 tx.append(event1, metadata.clone())?;
 tx.append(event2, metadata.clone())?;
 tx.commit()?; // Events visible only after commit
@@ -105,22 +125,30 @@ For production, consider implementing codecs for:
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-pub trait SnapshotStore<A: Aggregate> {
-    type Error: std::error::Error;
+pub trait SnapshotStore {
+    type Id;
     type Position;
+    type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Load the latest snapshot for an aggregate
-    fn load(&self, aggregate_kind: &str, aggregate_id: &A::Id)
-        -> Result<Option<Snapshot<A, Self::Position>>, Self::Error>;
+    fn load(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &Self::Id,
+    ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
 
-    /// Offer a snapshot (the store decides whether to save)
+    fn should_snapshot(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &Self::Id,
+        events_since_last_snapshot: u64,
+    ) -> bool;
+
     fn offer_snapshot(
         &mut self,
         aggregate_kind: &str,
-        aggregate_id: &A::Id,
-        aggregate: &A,
-        position: Self::Position,
-        events_since_last_snapshot: usize,
+        aggregate_id: &Self::Id,
+        snapshot: Snapshot<Self::Position>,
+        events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error>;
 }
 ```
@@ -132,9 +160,9 @@ See [Snapshots](../advanced/snapshots.md) for details.
 Events loaded from the store:
 
 ```rust,ignore
-pub struct StoredEvent<Pos, M> {
+pub struct StoredEvent<Id, Pos, M> {
     pub aggregate_kind: String,
-    pub aggregate_id: String,
+    pub aggregate_id: Id,
     pub kind: String,           // Event type (e.g., "account.deposited")
     pub position: Pos,          // Global or stream position
     pub data: Vec<u8>,          // Serialized event payload
