@@ -2,5 +2,4 @@
     "rust-analyzer.cargo.features": [
         "test-util"
     ]
-
 }

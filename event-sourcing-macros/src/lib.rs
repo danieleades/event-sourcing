@@ -3,8 +3,25 @@
 
 use darling::{FromDeriveInput, FromMeta, util::PathList};
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{DeriveInput, Ident, Path, parse_macro_input};
+
+/// Converts a `PascalCase` or `camelCase` string to `kebab-case`.
+fn to_kebab_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('-');
+            }
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
 
 /// Wrapper for `syn::Path` that parses from `key = Type` syntax.
 #[derive(Debug)]
@@ -72,20 +89,23 @@ struct AggregateArgs {
 pub fn derive_aggregate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
-    match AggregateArgs::from_derive_input(&input) {
-        Ok(args) => generate_aggregate_impl(args, &input),
-        Err(err) => err.write_errors().into(),
+    derive_aggregate_impl(&input).into()
+}
+
+fn derive_aggregate_impl(input: &DeriveInput) -> TokenStream2 {
+    match AggregateArgs::from_derive_input(input) {
+        Ok(args) => generate_aggregate_impl(args, input),
+        Err(err) => err.write_errors(),
     }
 }
 
-fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStream {
+fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStream2 {
     let event_types: Vec<&Path> = args.events.iter().collect();
 
     if event_types.is_empty() {
         return darling::Error::custom("events(...) must contain at least one event type")
             .with_span(&input.ident)
-            .write_errors()
-            .into();
+            .write_errors();
     }
 
     let struct_name = &args.ident;
@@ -95,7 +115,7 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
 
     let kind = args
         .kind
-        .unwrap_or_else(|| struct_name.to_string().to_lowercase());
+        .unwrap_or_else(|| to_kebab_case(&struct_name.to_string()));
 
     let event_enum_name = args.event_enum.map_or_else(
         || Ident::new(&format!("{struct_name}Event"), struct_name.span()),
@@ -118,31 +138,36 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
             #(#variant_names(#event_types)),*
         }
 
-        impl ::event_sourcing::ProjectionEvent for #event_enum_name {
+        impl ::event_sourcing::codec::ProjectionEvent for #event_enum_name {
             const EVENT_KINDS: &'static [&'static str] = &[#(#event_types::KIND),*];
 
-            fn from_stored<C: ::event_sourcing::Codec>(
+            fn from_stored<C: ::event_sourcing::codec::Codec>(
                 kind: &str,
                 data: &[u8],
                 codec: &C,
-            ) -> Result<Self, C::Error> {
+            ) -> Result<Self, ::event_sourcing::codec::EventDecodeError<C::Error>> {
                 match kind {
-                    #(#event_types::KIND => Ok(Self::#variant_names(codec.deserialize(data)?)),)*
-                    _ => panic!("Unknown event kind: {}", kind),
+                    #(#event_types::KIND => Ok(Self::#variant_names(
+                        codec.deserialize(data).map_err(::event_sourcing::codec::EventDecodeError::Codec)?
+                    )),)*
+                    _ => Err(::event_sourcing::codec::EventDecodeError::UnknownKind {
+                        kind: kind.to_string(),
+                        expected: Self::EVENT_KINDS,
+                    }),
                 }
             }
         }
 
-        impl ::event_sourcing::SerializableEvent for #event_enum_name {
-            fn to_persistable<C: ::event_sourcing::Codec, M>(
+        impl ::event_sourcing::codec::SerializableEvent for #event_enum_name {
+            fn to_persistable<C: ::event_sourcing::codec::Codec, M>(
                 self,
                 codec: &C,
                 metadata: M,
-            ) -> Result<::event_sourcing::PersistableEvent<M>, C::Error> {
+            ) -> Result<::event_sourcing::store::PersistableEvent<M>, C::Error> {
                 let (kind, data) = match self {
                     #(Self::#variant_names(event) => (#event_types::KIND.to_string(), codec.serialize(&event)?)),*
                 };
-                Ok(::event_sourcing::PersistableEvent { kind, data, metadata })
+                Ok(::event_sourcing::store::PersistableEvent { kind, data, metadata })
             }
         }
 
@@ -168,5 +193,83 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
         }
     };
 
-    TokenStream::from(expanded)
+    expanded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse_quote;
+
+    #[test]
+    fn to_kebab_case_converts_pascal_and_camel() {
+        assert_eq!(to_kebab_case("BankAccount"), "bank-account");
+        assert_eq!(to_kebab_case("camelCase"), "camel-case");
+    }
+
+    #[test]
+    fn type_path_parses_name_value_path() {
+        let meta: syn::Meta = parse_quote!(id = String);
+        let parsed = TypePath::from_meta(&meta).unwrap();
+        assert_eq!(parsed.0, parse_quote!(String));
+    }
+
+    #[test]
+    fn type_path_rejects_non_path_value() {
+        let meta: syn::Meta = parse_quote!(id = "String");
+        let err = TypePath::from_meta(&meta).unwrap_err();
+        assert!(err.to_string().contains("expected `key = Type`"));
+    }
+
+    #[test]
+    fn generate_aggregate_impl_uses_default_kind_and_event_enum() {
+        let input: DeriveInput = parse_quote! {
+            #[aggregate(id = String, error = String, events(FundsDeposited))]
+            pub struct Account {
+                balance: i64,
+            }
+        };
+
+        let expanded = derive_aggregate_impl(&input).to_string();
+        let compact: String = expanded.chars().filter(|c| !c.is_whitespace()).collect();
+
+        assert!(compact.contains("enumAccountEvent"));
+        assert!(compact.contains("impl::event_sourcing::AggregateforAccount"));
+        assert!(compact.contains("constKIND:&'staticstr=\"account\""));
+    }
+
+    #[test]
+    fn generate_aggregate_impl_respects_kind_and_event_enum_overrides() {
+        let input: DeriveInput = parse_quote! {
+            #[aggregate(
+                id = String,
+                error = String,
+                events(FundsDeposited),
+                kind = "bank-account",
+                event_enum = "BankAccountEvent"
+            )]
+            pub struct Account {
+                balance: i64,
+            }
+        };
+
+        let expanded = derive_aggregate_impl(&input).to_string();
+        let compact: String = expanded.chars().filter(|c| !c.is_whitespace()).collect();
+
+        assert!(compact.contains("enumBankAccountEvent"));
+        assert!(compact.contains("constKIND:&'staticstr=\"bank-account\""));
+    }
+
+    #[test]
+    fn generate_aggregate_impl_emits_error_on_empty_events_list() {
+        let input: DeriveInput = parse_quote! {
+            #[aggregate(id = String, error = String, events())]
+            pub struct Account;
+        };
+
+        let expanded = derive_aggregate_impl(&input).to_string();
+        let compact: String = expanded.chars().filter(|c| !c.is_whitespace()).collect();
+
+        assert!(compact.contains("events(...)mustcontainatleastoneeventtype"));
+    }
 }

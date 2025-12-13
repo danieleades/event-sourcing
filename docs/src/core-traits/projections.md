@@ -5,20 +5,15 @@ Projections are read models built by replaying events. They're optimized for que
 ## The `Projection` Trait
 
 ```rust,ignore
-pub trait Projection: Default + Sized {
-    /// Metadata type this projection expects
-    type Metadata;
-}
+{{#include ../../../src/projection.rs:projection_trait}}
 ```
 
 Projections must be `Default` because they start empty and build up through event replay.
 
-## The `ApplyProjection<E, M>` Trait
+## The `ApplyProjection<Id, E, M>` Trait
 
 ```rust,ignore
-pub trait ApplyProjection<E, M> {
-    fn apply_projection(&mut self, aggregate_id: &str, event: &E, metadata: &M);
-}
+{{#include ../../../src/projection.rs:apply_projection_trait}}
 ```
 
 Unlike aggregate `Apply`, projections receive:
@@ -39,15 +34,15 @@ impl Projection for AccountSummary {
     type Metadata = ();
 }
 
-impl ApplyProjection<FundsDeposited, ()> for AccountSummary {
-    fn apply_projection(&mut self, id: &str, event: &FundsDeposited, _: &()) {
-        *self.accounts.entry(id.to_string()).or_default() += event.amount;
+impl ApplyProjection<String, FundsDeposited, ()> for AccountSummary {
+    fn apply_projection(&mut self, id: &String, event: &FundsDeposited, _: &()) {
+        *self.accounts.entry(id.clone()).or_default() += event.amount;
     }
 }
 
-impl ApplyProjection<FundsWithdrawn, ()> for AccountSummary {
-    fn apply_projection(&mut self, id: &str, event: &FundsWithdrawn, _: &()) {
-        *self.accounts.entry(id.to_string()).or_default() -= event.amount;
+impl ApplyProjection<String, FundsWithdrawn, ()> for AccountSummary {
+    fn apply_projection(&mut self, id: &String, event: &FundsWithdrawn, _: &()) {
+        *self.accounts.entry(id.clone()).or_default() -= event.amount;
     }
 }
 ```
@@ -93,17 +88,17 @@ pub struct InventoryReport {
     pub total_sales: i64,
 }
 
-impl ApplyProjection<ProductCreated, ()> for InventoryReport {
-    fn apply_projection(&mut self, id: &str, event: &ProductCreated, _: &()) {
-        self.products.insert(id.to_string(), ProductInfo {
+impl ApplyProjection<String, ProductCreated, ()> for InventoryReport {
+    fn apply_projection(&mut self, id: &String, event: &ProductCreated, _: &()) {
+        self.products.insert(id.clone(), ProductInfo {
             name: event.name.clone(),
             sales_count: 0,
         });
     }
 }
 
-impl ApplyProjection<SaleRecorded, ()> for InventoryReport {
-    fn apply_projection(&mut self, id: &str, event: &SaleRecorded, _: &()) {
+impl ApplyProjection<String, SaleRecorded, ()> for InventoryReport {
+    fn apply_projection(&mut self, _id: &String, event: &SaleRecorded, _: &()) {
         if let Some(product) = self.products.get_mut(&event.product_id) {
             product.sales_count += event.quantity;
         }
@@ -125,13 +120,12 @@ let report = repository
 
 ## Filtering by Aggregate
 
-Use `.event_for()` to load events from a specific aggregate instance:
+Use `.events_for()` to load all events for a specific aggregate instance:
 
 ```rust,ignore
 let account_history = repository
     .build_projection::<TransactionHistory>()
-    .event_for::<Account, FundsDeposited>(&account_id)
-    .event_for::<Account, FundsWithdrawn>(&account_id)
+    .events_for::<Account>(&account_id)
     .load()?;
 ```
 
@@ -155,8 +149,8 @@ impl Projection for AuditLog {
     type Metadata = EventMetadata;
 }
 
-impl ApplyProjection<FundsDeposited, EventMetadata> for AuditLog {
-    fn apply_projection(&mut self, id: &str, event: &FundsDeposited, meta: &EventMetadata) {
+impl ApplyProjection<String, FundsDeposited, EventMetadata> for AuditLog {
+    fn apply_projection(&mut self, id: &String, event: &FundsDeposited, meta: &EventMetadata) {
         self.entries.push(AuditEntry {
             timestamp: meta.timestamp,
             user: meta.user_id.clone(),

@@ -62,8 +62,8 @@ impl Projection for TotalDeposits {
     type Metadata = ();
 }
 
-impl ApplyProjection<FundsDeposited, ()> for TotalDeposits {
-    fn apply_projection(&mut self, _id: &str, event: &FundsDeposited, _meta: &()) {
+impl ApplyProjection<String, FundsDeposited, ()> for TotalDeposits {
+    fn apply_projection(&mut self, _id: &String, event: &FundsDeposited, _meta: &()) {
         self.total += event.amount;
     }
 }
@@ -72,7 +72,7 @@ impl ApplyProjection<FundsDeposited, ()> for TotalDeposits {
 // ANCHOR: main
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an in-memory store
-    let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     // Execute a command

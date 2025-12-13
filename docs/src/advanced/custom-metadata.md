@@ -26,7 +26,7 @@ Configure your store with the metadata type:
 ```rust,ignore
 use event_sourcing::{InMemoryEventStore, JsonCodec};
 
-let store: InMemoryEventStore<JsonCodec, EventMetadata> =
+let store: InMemoryEventStore<String, JsonCodec, EventMetadata> =
     InMemoryEventStore::new(JsonCodec);
 ```
 
@@ -65,10 +65,10 @@ impl Projection for AuditLog {
     type Metadata = EventMetadata;
 }
 
-impl ApplyProjection<FundsDeposited, EventMetadata> for AuditLog {
+impl ApplyProjection<String, FundsDeposited, EventMetadata> for AuditLog {
     fn apply_projection(
         &mut self,
-        aggregate_id: &str,
+        aggregate_id: &String,
         event: &FundsDeposited,
         meta: &EventMetadata,
     ) {
@@ -124,7 +124,7 @@ let follow_up_metadata = EventMetadata {
 If you don't need metadata, use `()`:
 
 ```rust,ignore
-let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
 
 repository.execute_command::<Account, Deposit>(&id, &cmd, &())?;
 ```
@@ -156,10 +156,10 @@ impl Projection for TenantDashboard {
     type Metadata = TenantMetadata;
 }
 
-impl ApplyProjection<OrderPlaced, TenantMetadata> for TenantDashboard {
+impl ApplyProjection<String, OrderPlaced, TenantMetadata> for TenantDashboard {
     fn apply_projection(
         &mut self,
-        _id: &str,
+        _id: &String,
         event: &OrderPlaced,
         meta: &TenantMetadata,
     ) {

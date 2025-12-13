@@ -29,7 +29,7 @@ Instead of replaying 1050 events, you load the snapshot and replay only 50.
 Use `with_snapshots()` when creating the repository:
 
 ```rust,ignore
-use event_sourcing::{InMemorySnapshotStore, Repository};
+use event_sourcing::{InMemoryEventStore, InMemorySnapshotStore, JsonCodec, Repository};
 
 let event_store = InMemoryEventStore::new(JsonCodec);
 let snapshot_store = InMemorySnapshotStore::always();
@@ -75,39 +75,47 @@ Use for: Read-only replicas, debugging.
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-pub trait SnapshotStore<A: Aggregate> {
-    type Error: std::error::Error;
+pub trait SnapshotStore {
+    type Id;
     type Position;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     fn load(
         &self,
         aggregate_kind: &str,
-        aggregate_id: &A::Id,
-    ) -> Result<Option<Snapshot<A, Self::Position>>, Self::Error>;
+        aggregate_id: &Self::Id,
+    ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
+
+    fn should_snapshot(
+        &self,
+        aggregate_kind: &str,
+        aggregate_id: &Self::Id,
+        events_since_last_snapshot: u64,
+    ) -> bool;
 
     fn offer_snapshot(
         &mut self,
         aggregate_kind: &str,
-        aggregate_id: &A::Id,
-        aggregate: &A,
-        position: Self::Position,
-        events_since_last_snapshot: usize,
+        aggregate_id: &Self::Id,
+        snapshot: Snapshot<Self::Position>,
+        events_since_last_snapshot: u64,
     ) -> Result<(), Self::Error>;
 }
 ```
 
-The `offer_snapshot` method receives `events_since_last_snapshot`, allowing the store to decide based on event count.
+The repository calls `should_snapshot` before serializing aggregate state, so snapshot stores can
+avoid unnecessary snapshot encoding work when a policy declines.
 
 ## The `Snapshot` Type
 
 ```rust,ignore
-pub struct Snapshot<A, Pos> {
-    pub aggregate: A,
+pub struct Snapshot<Pos> {
     pub position: Pos,
+    pub data: Vec<u8>,
 }
 ```
 
-The position indicates where to resume loading events.
+The `data` is the serialized aggregate state encoded using the repository's event codec.
 
 ## When to Snapshot
 
@@ -123,29 +131,32 @@ The position indicates where to resume loading events.
 For production, implement `SnapshotStore` with your database:
 
 ```rust,ignore
-impl SnapshotStore<Account> for PostgresSnapshotStore {
+impl SnapshotStore for PostgresSnapshotStore {
     type Error = sqlx::Error;
+    type Id = String;
     type Position = u64;
 
     fn load(&self, kind: &str, id: &String)
-        -> Result<Option<Snapshot<Account, u64>>, Self::Error>
+        -> Result<Option<Snapshot<u64>>, Self::Error>
     {
         // SELECT aggregate_data, position
         // FROM snapshots
         // WHERE aggregate_kind = $1 AND aggregate_id = $2
     }
 
+    fn should_snapshot(&self, _kind: &str, _id: &String, events_since: u64) -> bool {
+        events_since >= 100
+    }
+
     fn offer_snapshot(
         &mut self,
         kind: &str,
         id: &String,
-        aggregate: &Account,
-        position: u64,
-        events_since: usize,
+        snapshot: Snapshot<u64>,
+        events_since: u64,
     ) -> Result<(), Self::Error> {
-        if events_since >= 100 {
-            // INSERT INTO snapshots ...
-        }
+        debug_assert!(self.should_snapshot(kind, id, events_since));
+        // INSERT INTO snapshots (kind, id, position, data) VALUES (...)
         Ok(())
     }
 }

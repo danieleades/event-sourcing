@@ -28,6 +28,7 @@
 
 # Advanced Topics
 
+- [Optimistic Concurrency](advanced/optimistic-concurrency.md)
 - [Snapshots](advanced/snapshots.md)
 - [Event Versioning](advanced/event-versioning.md)
 - [Custom Metadata](advanced/custom-metadata.md)

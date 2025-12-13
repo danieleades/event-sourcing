@@ -167,7 +167,7 @@ impl fmt::Display for InvoiceId {
 
 #[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(
-    id = InvoiceId,
+    id = String,
     error = String,
     events(InvoiceIssued, PaymentRecorded, InvoiceSettled),
     kind = "invoice"
@@ -348,10 +348,10 @@ impl CustomerBillingProjection {
     }
 }
 
-impl ApplyProjection<SubscriptionStarted, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<String, SubscriptionStarted, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        aggregate_id: &str,
+        aggregate_id: &String,
         event: &SubscriptionStarted,
         metadata: &EventMetadata,
     ) {
@@ -366,10 +366,10 @@ impl ApplyProjection<SubscriptionStarted, EventMetadata> for CustomerBillingProj
     }
 }
 
-impl ApplyProjection<SubscriptionCancelled, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<String, SubscriptionCancelled, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        aggregate_id: &str,
+        aggregate_id: &String,
         _event: &SubscriptionCancelled,
         metadata: &EventMetadata,
     ) {
@@ -384,10 +384,10 @@ impl ApplyProjection<SubscriptionCancelled, EventMetadata> for CustomerBillingPr
     }
 }
 
-impl ApplyProjection<InvoiceIssued, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<String, InvoiceIssued, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &str,
+        _aggregate_id: &String,
         event: &InvoiceIssued,
         metadata: &EventMetadata,
     ) {
@@ -401,10 +401,10 @@ impl ApplyProjection<InvoiceIssued, EventMetadata> for CustomerBillingProjection
     }
 }
 
-impl ApplyProjection<PaymentRecorded, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<String, PaymentRecorded, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &str,
+        _aggregate_id: &String,
         event: &PaymentRecorded,
         metadata: &EventMetadata,
     ) {
@@ -418,10 +418,10 @@ impl ApplyProjection<PaymentRecorded, EventMetadata> for CustomerBillingProjecti
     }
 }
 
-impl ApplyProjection<InvoiceSettled, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<String, InvoiceSettled, EventMetadata> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &str,
+        _aggregate_id: &String,
         event: &InvoiceSettled,
         metadata: &EventMetadata,
     ) {
@@ -440,7 +440,8 @@ impl ApplyProjection<InvoiceSettled, EventMetadata> for CustomerBillingProjectio
 
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<String, JsonCodec, EventMetadata> =
+        InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let customer_id = String::from("ACME-001");
@@ -461,10 +462,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Issue an invoice tied to the subscription lifecycle
     let invoice_id = InvoiceId::new(customer_id.clone(), "2024-INV-1001");
+    let invoice_stream_id = invoice_id.to_string();
     let invoice_corr = format!("invoice/{}", invoice_id.invoice_number);
 
     repository.execute_command::<Invoice, IssueInvoice>(
-        &invoice_id,
+        &invoice_stream_id,
         &IssueInvoice {
             customer_id: customer_id.clone(),
             amount_cents: 12_000,
@@ -478,7 +480,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Record a partial payment
     repository.execute_command::<Invoice, RecordPayment>(
-        &invoice_id,
+        &invoice_stream_id,
         &RecordPayment {
             amount_cents: 5_000,
         },
@@ -490,7 +492,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Record remaining balance
     repository.execute_command::<Invoice, RecordPayment>(
-        &invoice_id,
+        &invoice_stream_id,
         &RecordPayment {
             amount_cents: 7_000,
         },

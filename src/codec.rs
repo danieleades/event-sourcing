@@ -4,24 +4,48 @@
 //! `ProjectionEvent` are implemented by aggregate event enums to bridge the gap
 //! between domain variants and stored representations.
 
-/// Serialisation strategy used by event stores.
-pub trait Codec {
-    type Error;
+use thiserror::Error;
 
+/// Error returned when deserializing a stored event fails.
+#[derive(Debug, Error)]
+pub enum EventDecodeError<CodecError> {
+    /// The event kind was not recognized by this event enum.
+    #[error("unknown event kind `{kind}`, expected one of {expected:?}")]
+    UnknownKind {
+        /// The unrecognized event kind string.
+        kind: String,
+        /// The list of event kinds this enum can handle.
+        expected: &'static [&'static str],
+    },
+    /// The codec failed to deserialize the event data.
+    #[error("codec error: {0}")]
+    Codec(#[source] CodecError),
+}
+
+/// Serialisation strategy used by event stores.
+// ANCHOR: codec_trait
+pub trait Codec {
+    type Error: std::error::Error;
+
+    /// Serialize a value for persistence.
+    ///
     /// # Errors
     ///
-    /// Returns an error from the codec if the event cannot be serialized.
-    fn serialize<E>(&self, event: &E) -> Result<Vec<u8>, Self::Error>
+    /// Returns an error from the codec if the value cannot be serialized.
+    fn serialize<T>(&self, value: &T) -> Result<Vec<u8>, Self::Error>
     where
-        E: crate::event::DomainEvent;
+        T: serde::Serialize;
 
+    /// Deserialize a value from stored bytes.
+    ///
     /// # Errors
     ///
     /// Returns an error from the codec if the bytes cannot be decoded.
-    fn deserialize<E>(&self, data: &[u8]) -> Result<E, Self::Error>
+    fn deserialize<T>(&self, data: &[u8]) -> Result<T, Self::Error>
     where
-        E: crate::event::DomainEvent;
+        T: serde::de::DeserializeOwned;
 }
+// ANCHOR_END: codec_trait
 
 /// Trait for event sum types that can serialize themselves for persistence.
 ///
@@ -60,6 +84,11 @@ pub trait ProjectionEvent: Sized {
     ///
     /// # Errors
     ///
-    /// Returns a codec error if deserialization fails.
-    fn from_stored<C: Codec>(kind: &str, data: &[u8], codec: &C) -> Result<Self, C::Error>;
+    /// Returns [`EventDecodeError::UnknownKind`] if the event kind is not recognized,
+    /// or [`EventDecodeError::Codec`] if deserialization fails.
+    fn from_stored<C: Codec>(
+        kind: &str,
+        data: &[u8],
+        codec: &C,
+    ) -> Result<Self, EventDecodeError<C::Error>>;
 }

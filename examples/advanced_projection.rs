@@ -12,9 +12,9 @@
 use std::collections::HashMap;
 
 use event_sourcing::Aggregate;
+use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, EventStore, InMemoryEventStore, JsonCodec, Projection,
-    Repository,
+    Apply, ApplyProjection, DomainEvent, InMemoryEventStore, JsonCodec, Projection, Repository,
 };
 use serde::{Deserialize, Serialize};
 
@@ -107,26 +107,41 @@ impl Projection for ProductSummary {
     type Metadata = ();
 }
 
-impl ApplyProjection<ProductRestocked, ()> for ProductSummary {
-    fn apply_projection(&mut self, _aggregate_id: &str, event: &ProductRestocked, _metadata: &()) {
+impl ApplyProjection<String, ProductRestocked, ()> for ProductSummary {
+    fn apply_projection(
+        &mut self,
+        _aggregate_id: &String,
+        event: &ProductRestocked,
+        _metadata: &(),
+    ) {
         *self.stock_levels.entry(event.sku.clone()).or_default() += event.quantity;
     }
 }
 
-impl ApplyProjection<InventoryAdjusted, ()> for ProductSummary {
-    fn apply_projection(&mut self, _aggregate_id: &str, event: &InventoryAdjusted, _metadata: &()) {
+impl ApplyProjection<String, InventoryAdjusted, ()> for ProductSummary {
+    fn apply_projection(
+        &mut self,
+        _aggregate_id: &String,
+        event: &InventoryAdjusted,
+        _metadata: &(),
+    ) {
         *self.stock_levels.entry(event.sku.clone()).or_default() += event.delta;
     }
 }
 
-impl ApplyProjection<SaleCompleted, ()> for ProductSummary {
-    fn apply_projection(&mut self, _aggregate_id: &str, event: &SaleCompleted, _metadata: &()) {
+impl ApplyProjection<String, SaleCompleted, ()> for ProductSummary {
+    fn apply_projection(&mut self, _aggregate_id: &String, event: &SaleCompleted, _metadata: &()) {
         *self.sales.entry(event.product_sku.clone()).or_default() += event.quantity;
     }
 }
 
-impl ApplyProjection<PromotionApplied, ()> for ProductSummary {
-    fn apply_projection(&mut self, _aggregate_id: &str, event: &PromotionApplied, _metadata: &()) {
+impl ApplyProjection<String, PromotionApplied, ()> for ProductSummary {
+    fn apply_projection(
+        &mut self,
+        _aggregate_id: &String,
+        event: &PromotionApplied,
+        _metadata: &(),
+    ) {
         *self
             .promotion_totals
             .entry(event.product_sku.clone())
@@ -135,56 +150,53 @@ impl ApplyProjection<PromotionApplied, ()> for ProductSummary {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let product_id = String::from("SKU-007");
     let sale_id = String::from("sale-123");
     let promotion_id = String::from("promo-42");
 
-    // Seed the store manually using the aggregate event enums.
-    let mut product_tx = repository
-        .event_store_mut()
-        .begin(Product::KIND, &product_id);
-    product_tx.append(
-        ProductEvent::from(ProductRestocked {
-            sku: "SKU-007".into(),
-            quantity: 50,
-        }),
-        (),
+    // Seed the store using the test utilities.
+    repository.seed_events::<Product>(
+        &product_id,
+        vec![
+            ProductRestocked {
+                sku: "SKU-007".into(),
+                quantity: 50,
+            }
+            .into(),
+            InventoryAdjusted {
+                sku: "SKU-007".into(),
+                delta: -5,
+            }
+            .into(),
+        ],
     )?;
-    product_tx.append(
-        ProductEvent::from(InventoryAdjusted {
-            sku: "SKU-007".into(),
-            delta: -5,
-        }),
-        (),
-    )?;
-    product_tx.commit()?;
 
-    let mut sale_tx = repository.event_store_mut().begin(Sale::KIND, &sale_id);
-    sale_tx.append(
-        SaleEvent::from(SaleCompleted {
-            sale_id: "sale-123".into(),
-            product_sku: "SKU-007".into(),
-            quantity: 2,
-        }),
-        (),
+    repository.seed_events::<Sale>(
+        &sale_id,
+        vec![
+            SaleCompleted {
+                sale_id: "sale-123".into(),
+                product_sku: "SKU-007".into(),
+                quantity: 2,
+            }
+            .into(),
+        ],
     )?;
-    sale_tx.commit()?;
 
-    let mut promo_tx = repository
-        .event_store_mut()
-        .begin(Promotion::KIND, &promotion_id);
-    promo_tx.append(
-        PromotionEvent::from(PromotionApplied {
-            promotion_id: "promo-42".into(),
-            product_sku: "SKU-007".into(),
-            amount_cents: 300,
-        }),
-        (),
+    repository.seed_events::<Promotion>(
+        &promotion_id,
+        vec![
+            PromotionApplied {
+                promotion_id: "promo-42".into(),
+                product_sku: "SKU-007".into(),
+                amount_cents: 300,
+            }
+            .into(),
+        ],
     )?;
-    promo_tx.commit()?;
 
     // Build the projection with mixed filters.
     let summary = repository

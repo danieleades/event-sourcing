@@ -12,8 +12,9 @@ persist events through a pluggable store interface.
   serialization/deserialization glue so command handlers stay focused on behaviour.
 - **Repository orchestration** – `Repository` loads aggregates, executes commands via
   `Handle<C>`, and persists the resulting events in a single transaction.
-- **Metadata-aware projections** – projections receive `EventEnvelope` values so they can
-  correlate cross-aggregate workflows using IDs, causation, timestamps, or custom metadata.
+- **Metadata-aware projections** – projections receive aggregate IDs, events, and metadata
+  via `ApplyProjection`, enabling cross-aggregate correlation using causation, timestamps,
+  or custom metadata.
 - **Store agnostic** – ships with an in-memory store for demos/tests; implement the
   `EventStore` trait to plug in your own persistence.
 
@@ -26,8 +27,8 @@ This crate borrows inspiration from projects like
 - **Events stay as first-class structs.** Instead of immediately wrapping events in
   aggregate-specific enums, each `DomainEvent` stands on its own. Multiple aggregates (or
   even completely unrelated subsystems) can reuse the same event type. Projections receive
-  `EventEnvelope`s that carry aggregate identifiers and metadata rather than relying on
-  the payload to embed IDs.
+  aggregate identifiers and metadata alongside events rather than relying on the payload
+  to embed IDs.
 
 - **Projections are fully decoupled.** Read models don’t have to depend on a particular
   aggregate enum or repository type. You declare the events you care about—potentially
@@ -36,8 +37,9 @@ This crate borrows inspiration from projects like
   loading logic when you need it.
 
 - **Metadata lives outside domain objects.** Infrastructure concerns (aggregate kind, ID,
-  causation/correlation IDs, user info) travel alongside the event via `EventEnvelope`. The
-  domain event itself remains pure, making it easier to share across bounded contexts.
+  causation/correlation IDs, user info) travel alongside the event as separate parameters
+  to projection handlers. The domain event itself remains pure, making it easier to share
+  across bounded contexts.
 
 - **More boilerplate, mitigated when it matters.** Because events and projections are
   explicit structs, the type definitions are a bit louder than frameworks that lean on
@@ -54,10 +56,17 @@ This crate borrows inspiration from projects like
   like `cqrs`. Instead, you can migrate historical events transparently inside your codec
   (see [`examples/versioned_events.rs`](examples/versioned_events.rs)).
 
-- **No optimistic mutation hooks (yet).** `eventually` ships batteries-included APIs for
-  version-checked mutations. This crate intentionally keeps the repository/store layer lean
-  and does not currently expose an optimistic concurrency hook. Adding that capability is on
-  the roadmap; contributions welcome.
+- **Type-safe optimistic concurrency by default.** Repositories use version-checked
+  mutations by default. Conflicts are detected at the type level—the `Optimistic` strategy
+  returns `OptimisticCommandError::Concurrency` when the stream version changes between
+  load and commit. For automatic retry on conflicts, use `execute_with_retry`:
+
+  ```rust,ignore
+  let attempts = repo.execute_with_retry::<Account, Deposit>(&id, &cmd, &(), 3)?;
+  println!("Succeeded after {attempts} attempt(s)");
+  ```
+
+  See [`examples/optimistic_concurrency.rs`](examples/optimistic_concurrency.rs) for more.
 
 ## Quick start
 
@@ -126,10 +135,10 @@ impl Projection for AccountBalance {
     type Metadata = ();
 }
 
-impl ApplyProjection<FundsDeposited, ()> for AccountBalance {
+impl ApplyProjection<String, FundsDeposited, ()> for AccountBalance {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &str,
+        _aggregate_id: &String,
         event: &FundsDeposited,
         _metadata: &(),
     ) {
@@ -138,7 +147,7 @@ impl ApplyProjection<FundsDeposited, ()> for AccountBalance {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let account_id = "ACC-001".to_string();
@@ -158,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See [`examples/`](examples) for larger, end-to-end scenarios (composite IDs, CQRS dashboards,
+See the [examples](https://github.com/danieleades/event-sourcing/tree/main/examples) for larger, end-to-end scenarios (composite IDs, CQRS dashboards,
 versioned events, etc.).
 
 ## Core concepts
@@ -175,18 +184,19 @@ Read models that keep their state in sync by replaying events. Projections imple
 `ApplyProjection<E, M>` for the event/metadata combinations they care about and declare their
 metadata requirements via the `Projection` trait. Build them by calling
 `Repository::build_projection::<P>()`, chaining the relevant `.event::<E>()` / `.event_for::<A, E>()`
-registrations, and finally `.load()`.
+registrations (or `.events::<A::Event>()` / `.events_for::<A>()` for aggregate event enums), and
+finally `.load()`.
 
-### Event envelope
+### Event context
 
-The repository loads raw events from the store, converts them into `EventEnvelope` values,
-and dispatches them to projections. The envelope includes:
+The repository loads raw events from the store and dispatches them to projections via the
+`ApplyProjection` trait. Each projection handler receives:
 
-- `aggregate_kind` – matches `Aggregate::KIND`
-- `aggregate_id` – the instance identifier (without the kind prefix)
+- `aggregate_id` – the instance identifier
+- `event` – the deserialized domain event
 - `metadata` – timestamps, causation IDs, user information, or your own metadata type
 
-Aggregates never see the envelope—only the pure events.
+Aggregates never see this context—only the pure events.
 
 ### Repositories & stores
 
@@ -198,10 +208,12 @@ event streams.
 ## Running the examples
 
 ```shell
+cargo run --example quickstart
 cargo run --example inventory_report
 cargo run --example subscription_billing
 cargo run --example versioned_events
 cargo run --example advanced_projection
+cargo run --example optimistic_concurrency
 ```
 
 ## Documentation
