@@ -329,6 +329,7 @@ pub struct CustomerBillingProjection {
 }
 
 impl Projection for CustomerBillingProjection {
+    type Id = String;
     type Metadata = EventMetadata;
 }
 
@@ -348,12 +349,12 @@ impl CustomerBillingProjection {
     }
 }
 
-impl ApplyProjection<String, SubscriptionStarted, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<SubscriptionStarted> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        aggregate_id: &String,
+        aggregate_id: &Self::Id,
         event: &SubscriptionStarted,
-        metadata: &EventMetadata,
+        metadata: &Self::Metadata,
     ) {
         let customer_id = aggregate_id;
         let snapshot = self.touch_customer(customer_id.to_owned());
@@ -366,12 +367,12 @@ impl ApplyProjection<String, SubscriptionStarted, EventMetadata> for CustomerBil
     }
 }
 
-impl ApplyProjection<String, SubscriptionCancelled, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<SubscriptionCancelled> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        aggregate_id: &String,
+        aggregate_id: &Self::Id,
         _event: &SubscriptionCancelled,
-        metadata: &EventMetadata,
+        metadata: &Self::Metadata,
     ) {
         // aggregate_id already has the "subscription::" prefix stripped
         let customer_id = aggregate_id;
@@ -384,12 +385,12 @@ impl ApplyProjection<String, SubscriptionCancelled, EventMetadata> for CustomerB
     }
 }
 
-impl ApplyProjection<String, InvoiceIssued, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<InvoiceIssued> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &String,
+        _aggregate_id: &Self::Id,
         event: &InvoiceIssued,
-        metadata: &EventMetadata,
+        metadata: &Self::Metadata,
     ) {
         let snapshot = self.touch_customer(event.customer_id.clone());
         snapshot.outstanding_balance_cents += event.amount_cents;
@@ -401,12 +402,12 @@ impl ApplyProjection<String, InvoiceIssued, EventMetadata> for CustomerBillingPr
     }
 }
 
-impl ApplyProjection<String, PaymentRecorded, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<PaymentRecorded> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &String,
+        _aggregate_id: &Self::Id,
         event: &PaymentRecorded,
-        metadata: &EventMetadata,
+        metadata: &Self::Metadata,
     ) {
         let snapshot = self.touch_customer(event.customer_id.clone());
         snapshot.outstanding_balance_cents =
@@ -418,12 +419,12 @@ impl ApplyProjection<String, PaymentRecorded, EventMetadata> for CustomerBilling
     }
 }
 
-impl ApplyProjection<String, InvoiceSettled, EventMetadata> for CustomerBillingProjection {
+impl ApplyProjection<InvoiceSettled> for CustomerBillingProjection {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &String,
+        _aggregate_id: &Self::Id,
         event: &InvoiceSettled,
-        metadata: &EventMetadata,
+        metadata: &Self::Metadata,
     ) {
         let snapshot = self.touch_customer(event.customer_id.clone());
         snapshot.outstanding_balance_cents = 0;

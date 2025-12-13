@@ -104,43 +104,49 @@ struct ProductSummary {
 }
 
 impl Projection for ProductSummary {
+    type Id = String;
     type Metadata = ();
 }
 
-impl ApplyProjection<String, ProductRestocked, ()> for ProductSummary {
+impl ApplyProjection<ProductRestocked> for ProductSummary {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &String,
+        _aggregate_id: &Self::Id,
         event: &ProductRestocked,
-        _metadata: &(),
+        _metadata: &Self::Metadata,
     ) {
         *self.stock_levels.entry(event.sku.clone()).or_default() += event.quantity;
     }
 }
 
-impl ApplyProjection<String, InventoryAdjusted, ()> for ProductSummary {
+impl ApplyProjection<InventoryAdjusted> for ProductSummary {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &String,
+        _aggregate_id: &Self::Id,
         event: &InventoryAdjusted,
-        _metadata: &(),
+        _metadata: &Self::Metadata,
     ) {
         *self.stock_levels.entry(event.sku.clone()).or_default() += event.delta;
     }
 }
 
-impl ApplyProjection<String, SaleCompleted, ()> for ProductSummary {
-    fn apply_projection(&mut self, _aggregate_id: &String, event: &SaleCompleted, _metadata: &()) {
+impl ApplyProjection<SaleCompleted> for ProductSummary {
+    fn apply_projection(
+        &mut self,
+        _aggregate_id: &Self::Id,
+        event: &SaleCompleted,
+        _metadata: &Self::Metadata,
+    ) {
         *self.sales.entry(event.product_sku.clone()).or_default() += event.quantity;
     }
 }
 
-impl ApplyProjection<String, PromotionApplied, ()> for ProductSummary {
+impl ApplyProjection<PromotionApplied> for ProductSummary {
     fn apply_projection(
         &mut self,
-        _aggregate_id: &String,
+        _aggregate_id: &Self::Id,
         event: &PromotionApplied,
-        _metadata: &(),
+        _metadata: &Self::Metadata,
     ) {
         *self
             .promotion_totals

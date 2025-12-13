@@ -394,6 +394,7 @@ impl<A: Aggregate> TestResult<A> {
     /// - The command returned an error
     /// - The command produced any events
     #[track_caller]
+    #[allow(dead_code)]
     pub fn then_expect_no_events(self)
     where
         A::Event: fmt::Debug,
@@ -432,6 +433,7 @@ impl<A: Aggregate> TestResult<A> {
     /// - The command succeeded
     /// - The error doesn't match the expected error
     #[track_caller]
+    #[allow(dead_code)]
     pub fn then_expect_error_eq(self, expected: &A::Error)
     where
         A::Event: fmt::Debug,

@@ -17,11 +17,13 @@ use crate::{
 
 /// Trait implemented by read models that can be constructed from an event stream.
 ///
-/// Implementors specify the metadata type their [`ApplyProjection`] handlers expect.
+/// Implementors specify the identifier and metadata types their [`ApplyProjection`] handlers expect.
 /// Projections are typically rebuilt by calling [`Repository::build_projection`] and
 /// configuring the desired event streams before invoking [`ProjectionBuilder::load`].
 // ANCHOR: projection_trait
 pub trait Projection: Default + Sized {
+    /// Aggregate identifier type this projection is compatible with.
+    type Id;
     /// Metadata type expected by this projection
     type Metadata;
 }
@@ -33,16 +35,16 @@ pub trait Projection: Default + Sized {
 /// and metadata supplied by the backing store.
 ///
 /// ```ignore
-/// impl ApplyProjection<String, InventoryAdjusted, ()> for InventoryReport {
-///     fn apply_projection(&mut self, aggregate_id: &String, event: &InventoryAdjusted, _metadata: &()) {
+/// impl ApplyProjection<InventoryAdjusted> for InventoryReport {
+///     fn apply_projection(&mut self, aggregate_id: &Self::Id, event: &InventoryAdjusted, _metadata: &Self::Metadata) {
 ///         let stats = self.products.entry(aggregate_id.clone()).or_default();
 ///         stats.quantity += event.delta;
 ///     }
 /// }
 /// ```
 // ANCHOR: apply_projection_trait
-pub trait ApplyProjection<Id, E, M> {
-    fn apply_projection(&mut self, aggregate_id: &Id, event: &E, metadata: &M);
+pub trait ApplyProjection<E>: Projection {
+    fn apply_projection(&mut self, aggregate_id: &Self::Id, event: &E, metadata: &Self::Metadata);
 }
 // ANCHOR_END: apply_projection_trait
 
@@ -94,7 +96,7 @@ type EventHandler<P, S> = Box<
 pub struct ProjectionBuilder<'a, S, P>
 where
     S: EventStore,
-    P: Projection,
+    P: Projection<Id = S::Id>,
 {
     pub(super) store: &'a S,
     /// Event kind -> handler mapping for O(1) dispatch
@@ -107,7 +109,7 @@ where
 impl<'a, S, P> ProjectionBuilder<'a, S, P>
 where
     S: EventStore,
-    P: Projection,
+    P: Projection<Id = S::Id>,
 {
     pub(super) fn new(store: &'a S) -> Self {
         Self {
@@ -134,7 +136,7 @@ where
     pub fn event<E>(mut self) -> Self
     where
         E: DomainEvent,
-        P: ApplyProjection<S::Id, E, P::Metadata>,
+        P: ApplyProjection<E>,
         S::Metadata: Clone + Into<P::Metadata>,
     {
         self.filters.push(EventFilter::for_event(E::KIND));
@@ -164,7 +166,7 @@ where
     pub fn events<E>(mut self) -> Self
     where
         E: ProjectionEvent,
-        P: ApplyProjection<S::Id, E, P::Metadata>,
+        P: ApplyProjection<E>,
         S::Metadata: Clone + Into<P::Metadata>,
     {
         for &kind in E::EVENT_KINDS {
@@ -197,7 +199,7 @@ where
     where
         A: Aggregate<Id = S::Id>,
         E: DomainEvent,
-        P: ApplyProjection<S::Id, E, P::Metadata>,
+        P: ApplyProjection<E>,
         S::Metadata: Clone + Into<P::Metadata>,
     {
         self.filters.push(EventFilter::for_aggregate(
@@ -234,7 +236,7 @@ where
     where
         A: Aggregate<Id = S::Id>,
         A::Event: ProjectionEvent,
-        P: ApplyProjection<S::Id, A::Event, P::Metadata>,
+        P: ApplyProjection<A::Event>,
         S::Metadata: Clone + Into<P::Metadata>,
     {
         for &kind in <A::Event as ProjectionEvent>::EVENT_KINDS {

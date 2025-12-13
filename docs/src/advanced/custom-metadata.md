@@ -62,15 +62,16 @@ pub struct AuditLog {
 }
 
 impl Projection for AuditLog {
+    type Id = String;
     type Metadata = EventMetadata;
 }
 
-impl ApplyProjection<String, FundsDeposited, EventMetadata> for AuditLog {
+impl ApplyProjection<FundsDeposited> for AuditLog {
     fn apply_projection(
         &mut self,
-        aggregate_id: &String,
+        aggregate_id: &Self::Id,
         event: &FundsDeposited,
-        meta: &EventMetadata,
+        meta: &Self::Metadata,
     ) {
         self.entries.push(AuditEntry {
             timestamp: meta.timestamp,
@@ -153,15 +154,16 @@ pub struct TenantMetadata {
 }
 
 impl Projection for TenantDashboard {
+    type Id = String;
     type Metadata = TenantMetadata;
 }
 
-impl ApplyProjection<String, OrderPlaced, TenantMetadata> for TenantDashboard {
+impl ApplyProjection<OrderPlaced> for TenantDashboard {
     fn apply_projection(
         &mut self,
-        _id: &String,
+        _id: &Self::Id,
         event: &OrderPlaced,
-        meta: &TenantMetadata,
+        meta: &Self::Metadata,
     ) {
         // Only count orders for our tenant
         if meta.tenant_id == self.tenant_id {

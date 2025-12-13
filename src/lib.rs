@@ -184,32 +184,38 @@ mod tests {
     }
 
     impl Projection for CounterProjection {
+        type Id = String;
         type Metadata = ();
     }
 
-    impl ApplyProjection<String, ValueAdded, ()> for CounterProjection {
-        fn apply_projection(&mut self, aggregate_id: &String, event: &ValueAdded, _metadata: &()) {
+    impl ApplyProjection<ValueAdded> for CounterProjection {
+        fn apply_projection(
+            &mut self,
+            aggregate_id: &Self::Id,
+            event: &ValueAdded,
+            _metadata: &Self::Metadata,
+        ) {
             *self.totals.entry(aggregate_id.clone()).or_default() += event.amount;
         }
     }
 
-    impl ApplyProjection<String, ValueSubtracted, ()> for CounterProjection {
+    impl ApplyProjection<ValueSubtracted> for CounterProjection {
         fn apply_projection(
             &mut self,
-            aggregate_id: &String,
+            aggregate_id: &Self::Id,
             event: &ValueSubtracted,
-            _metadata: &(),
+            _metadata: &Self::Metadata,
         ) {
             *self.totals.entry(aggregate_id.clone()).or_default() -= event.amount;
         }
     }
 
-    impl ApplyProjection<String, CounterEvent, ()> for CounterProjection {
+    impl ApplyProjection<CounterEvent> for CounterProjection {
         fn apply_projection(
             &mut self,
-            aggregate_id: &String,
+            aggregate_id: &Self::Id,
             event: &CounterEvent,
-            _metadata: &(),
+            _metadata: &Self::Metadata,
         ) {
             match event {
                 CounterEvent::Added(e) => {
@@ -220,6 +226,57 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn store_access_trait_method_is_used() {
+        use crate::test::StoreAccess;
+
+        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let repo = Repository::new(store);
+
+        let _ = StoreAccess::store(&repo).codec();
+    }
+
+    #[test]
+    fn test_framework_helpers_compile_and_run() {
+        use crate::test::TestFramework;
+
+        #[derive(Default)]
+        struct Dummy;
+
+        impl Aggregate for Dummy {
+            const KIND: &'static str = "dummy";
+            type Event = ();
+            type Error = &'static str;
+            type Id = String;
+
+            fn apply(&mut self, &(): &Self::Event) {}
+        }
+
+        struct NoOp;
+        impl Handle<NoOp> for Dummy {
+            fn handle(&self, _: &NoOp) -> Result<Vec<Self::Event>, Self::Error> {
+                Ok(vec![])
+            }
+        }
+
+        struct Fail;
+        impl Handle<Fail> for Dummy {
+            fn handle(&self, _: &Fail) -> Result<Vec<Self::Event>, Self::Error> {
+                Err("fail")
+            }
+        }
+
+        TestFramework::<Dummy>::new()
+            .given_no_previous_events()
+            .when(&NoOp)
+            .then_expect_no_events();
+
+        TestFramework::<Dummy>::new()
+            .given_no_previous_events()
+            .when(&Fail)
+            .then_expect_error_eq(&"fail");
     }
 
     // ============================================================================

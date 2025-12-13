@@ -59,11 +59,12 @@ pub struct TotalDeposits {
 }
 
 impl Projection for TotalDeposits {
+    type Id = String;
     type Metadata = ();
 }
 
-impl ApplyProjection<String, FundsDeposited, ()> for TotalDeposits {
-    fn apply_projection(&mut self, _id: &String, event: &FundsDeposited, _meta: &()) {
+impl ApplyProjection<FundsDeposited> for TotalDeposits {
+    fn apply_projection(&mut self, _id: &Self::Id, event: &FundsDeposited, _meta: &Self::Metadata) {
         self.total += event.amount;
     }
 }
