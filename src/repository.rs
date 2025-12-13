@@ -237,7 +237,7 @@ where
 
     pub fn build_projection<P>(&self) -> ProjectionBuilder<'_, S, P>
     where
-        P: Projection,
+        P: Projection<Id = S::Id>,
     {
         ProjectionBuilder::new(&self.store)
     }
@@ -479,7 +479,7 @@ where
 
     pub fn build_projection<P>(&self) -> ProjectionBuilder<'_, S, P>
     where
-        P: Projection,
+        P: Projection<Id = S::Id>,
     {
         ProjectionBuilder::new(&self.store)
     }

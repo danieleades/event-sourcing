@@ -10,7 +10,7 @@ Projections are read models built by replaying events. They're optimized for que
 
 Projections must be `Default` because they start empty and build up through event replay.
 
-## The `ApplyProjection<Id, E, M>` Trait
+## The `ApplyProjection<E>` Trait
 
 ```rust,ignore
 {{#include ../../../src/projection.rs:apply_projection_trait}}
@@ -31,17 +31,18 @@ pub struct AccountSummary {
 }
 
 impl Projection for AccountSummary {
+    type Id = String;
     type Metadata = ();
 }
 
-impl ApplyProjection<String, FundsDeposited, ()> for AccountSummary {
-    fn apply_projection(&mut self, id: &String, event: &FundsDeposited, _: &()) {
+impl ApplyProjection<FundsDeposited> for AccountSummary {
+    fn apply_projection(&mut self, id: &Self::Id, event: &FundsDeposited, _: &Self::Metadata) {
         *self.accounts.entry(id.clone()).or_default() += event.amount;
     }
 }
 
-impl ApplyProjection<String, FundsWithdrawn, ()> for AccountSummary {
-    fn apply_projection(&mut self, id: &String, event: &FundsWithdrawn, _: &()) {
+impl ApplyProjection<FundsWithdrawn> for AccountSummary {
+    fn apply_projection(&mut self, id: &Self::Id, event: &FundsWithdrawn, _: &Self::Metadata) {
         *self.accounts.entry(id.clone()).or_default() -= event.amount;
     }
 }
@@ -88,8 +89,13 @@ pub struct InventoryReport {
     pub total_sales: i64,
 }
 
-impl ApplyProjection<String, ProductCreated, ()> for InventoryReport {
-    fn apply_projection(&mut self, id: &String, event: &ProductCreated, _: &()) {
+impl Projection for InventoryReport {
+    type Id = String;
+    type Metadata = ();
+}
+
+impl ApplyProjection<ProductCreated> for InventoryReport {
+    fn apply_projection(&mut self, id: &Self::Id, event: &ProductCreated, _: &Self::Metadata) {
         self.products.insert(id.clone(), ProductInfo {
             name: event.name.clone(),
             sales_count: 0,
@@ -97,8 +103,8 @@ impl ApplyProjection<String, ProductCreated, ()> for InventoryReport {
     }
 }
 
-impl ApplyProjection<String, SaleRecorded, ()> for InventoryReport {
-    fn apply_projection(&mut self, _id: &String, event: &SaleRecorded, _: &()) {
+impl ApplyProjection<SaleRecorded> for InventoryReport {
+    fn apply_projection(&mut self, _id: &Self::Id, event: &SaleRecorded, _: &Self::Metadata) {
         if let Some(product) = self.products.get_mut(&event.product_id) {
             product.sales_count += event.quantity;
         }
@@ -146,11 +152,12 @@ pub struct AuditLog {
 }
 
 impl Projection for AuditLog {
+    type Id = String;
     type Metadata = EventMetadata;
 }
 
-impl ApplyProjection<String, FundsDeposited, EventMetadata> for AuditLog {
-    fn apply_projection(&mut self, id: &String, event: &FundsDeposited, meta: &EventMetadata) {
+impl ApplyProjection<FundsDeposited> for AuditLog {
+    fn apply_projection(&mut self, id: &Self::Id, event: &FundsDeposited, meta: &Self::Metadata) {
         self.entries.push(AuditEntry {
             timestamp: meta.timestamp,
             user: meta.user_id.clone(),

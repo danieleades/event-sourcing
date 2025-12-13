@@ -720,9 +720,10 @@ mod repository_test_ext_tests {
     fn seed_events_appends_typed_events() {
         let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
         let mut repo = Repository::new(store);
+        let id = "s1".to_string();
 
         repo.seed_events::<Score>(
-            &"s1".to_string(),
+            &id,
             vec![
                 PointsAdded { points: 10 }.into(),
                 PointsAdded { points: 20 }.into(),
@@ -730,8 +731,13 @@ mod repository_test_ext_tests {
         )
         .unwrap();
 
+        assert_eq!(
+            repo.store().stream_version(Score::KIND, &id).unwrap(),
+            Some(1)
+        );
+
         // Verify events are loadable
-        let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();
+        let loaded: Score = repo.aggregate_builder().load(&id).unwrap();
         assert_eq!(loaded.total, 30);
     }
 
@@ -740,17 +746,23 @@ mod repository_test_ext_tests {
         let event_store: InMemoryEventStore<String, JsonCodec, ()> =
             InMemoryEventStore::new(JsonCodec);
         let mut repo = Repository::new(event_store);
+        let id = "s1".to_string();
 
         // Seed initial state
-        repo.seed_events::<Score>(&"s1".to_string(), vec![PointsAdded { points: 100 }.into()])
+        repo.seed_events::<Score>(&id, vec![PointsAdded { points: 100 }.into()])
             .unwrap();
 
         // Inject concurrent event
-        repo.inject_concurrent_event::<Score>(&"s1".to_string(), PointsAdded { points: 50 }.into())
+        repo.inject_concurrent_event::<Score>(&id, PointsAdded { points: 50 }.into())
             .unwrap();
 
+        assert_eq!(
+            repo.store().stream_version(Score::KIND, &id).unwrap(),
+            Some(1)
+        );
+
         // Verify both events are reflected
-        let loaded: Score = repo.aggregate_builder().load(&"s1".to_string()).unwrap();
+        let loaded: Score = repo.aggregate_builder().load(&id).unwrap();
         assert_eq!(loaded.total, 150);
     }
 

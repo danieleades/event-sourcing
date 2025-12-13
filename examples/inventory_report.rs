@@ -235,16 +235,17 @@ pub struct ProductStats {
 }
 
 impl Projection for InventoryReport {
+    type Id = String;
     type Metadata = ();
 }
 
 // ApplyProjection implementations - for events that need stream context
-impl ApplyProjection<String, ProductRestocked, ()> for InventoryReport {
+impl ApplyProjection<ProductRestocked> for InventoryReport {
     fn apply_projection(
         &mut self,
-        aggregate_id: &String,
+        aggregate_id: &Self::Id,
         event: &ProductRestocked,
-        _metadata: &(),
+        _metadata: &Self::Metadata,
     ) {
         // aggregate_id already has the "product::" prefix stripped
         let sku = aggregate_id;
@@ -260,12 +261,12 @@ impl ApplyProjection<String, ProductRestocked, ()> for InventoryReport {
     }
 }
 
-impl ApplyProjection<String, InventoryAdjusted, ()> for InventoryReport {
+impl ApplyProjection<InventoryAdjusted> for InventoryReport {
     fn apply_projection(
         &mut self,
-        aggregate_id: &String,
+        aggregate_id: &Self::Id,
         event: &InventoryAdjusted,
-        _metadata: &(),
+        _metadata: &Self::Metadata,
     ) {
         // aggregate_id already has the "product::" prefix stripped
         let sku = aggregate_id;
@@ -281,8 +282,13 @@ impl ApplyProjection<String, InventoryAdjusted, ()> for InventoryReport {
 }
 
 // ApplyProjection implementation - needs aggregate_id to extract product SKU
-impl ApplyProjection<String, SaleCompleted, ()> for InventoryReport {
-    fn apply_projection(&mut self, aggregate_id: &String, event: &SaleCompleted, _metadata: &()) {
+impl ApplyProjection<SaleCompleted> for InventoryReport {
+    fn apply_projection(
+        &mut self,
+        aggregate_id: &Self::Id,
+        event: &SaleCompleted,
+        _metadata: &Self::Metadata,
+    ) {
         // Extract product SKU from aggregate_id format: "{product_sku}::{sale_number}"
         // (the "sale::" kind prefix has already been stripped)
         let sku = aggregate_id.split("::").next().unwrap_or(aggregate_id);
@@ -301,8 +307,13 @@ impl ApplyProjection<String, SaleCompleted, ()> for InventoryReport {
     }
 }
 
-impl ApplyProjection<String, SaleRefunded, ()> for InventoryReport {
-    fn apply_projection(&mut self, _aggregate_id: &String, event: &SaleRefunded, _metadata: &()) {
+impl ApplyProjection<SaleRefunded> for InventoryReport {
+    fn apply_projection(
+        &mut self,
+        _aggregate_id: &Self::Id,
+        event: &SaleRefunded,
+        _metadata: &Self::Metadata,
+    ) {
         self.total_refunds_cents += event.amount_cents;
         self.total_sales_revenue_cents -= event.amount_cents;
     }

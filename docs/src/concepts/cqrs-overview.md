@@ -59,7 +59,7 @@ Each projection sees the same events but builds a different view.
 The crate models CQRS through:
 
 - **`Aggregate`** + **`Handle<C>`** — the write side
-- **`Projection`** + **`ApplyProjection<Id, E, M>`** — the read side
+- **`Projection`** + **`ApplyProjection<E>`** — the read side
 - **`Repository`** — orchestrates both
 
 ```rust,ignore

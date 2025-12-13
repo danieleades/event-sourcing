@@ -91,7 +91,7 @@ impl Codec for VersionedCodec {
 
 ## Projections Decoupled from Aggregates
 
-**Decision**: Projections implement `ApplyProjection<Id, E, M>` for event types, not aggregate types.
+**Decision**: Projections implement `ApplyProjection<E>` for event types, not aggregate types.
 
 **Why**:
 - A projection can consume events from many aggregates
@@ -101,9 +101,10 @@ impl Codec for VersionedCodec {
 
 ```rust,ignore
 // Projection consumes from multiple aggregates
-impl ApplyProjection<String, OrderPlaced, ()> for Dashboard { /* ... */ }
-impl ApplyProjection<String, PaymentReceived, ()> for Dashboard { /* ... */ }
-impl ApplyProjection<String, ShipmentDispatched, ()> for Dashboard { /* ... */ }
+impl Projection for Dashboard { type Id = String; type Metadata = (); }
+impl ApplyProjection<OrderPlaced> for Dashboard { /* ... */ }
+impl ApplyProjection<PaymentReceived> for Dashboard { /* ... */ }
+impl ApplyProjection<ShipmentDispatched> for Dashboard { /* ... */ }
 ```
 
 ## Minimal Infrastructure

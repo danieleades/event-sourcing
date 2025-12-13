@@ -126,11 +126,17 @@ struct TotalsProjection {
 }
 
 impl Projection for TotalsProjection {
+    type Id = String;
     type Metadata = ();
 }
 
-impl ApplyProjection<String, ValueAdded, ()> for TotalsProjection {
-    fn apply_projection(&mut self, aggregate_id: &String, event: &ValueAdded, (): &()) {
+impl ApplyProjection<ValueAdded> for TotalsProjection {
+    fn apply_projection(
+        &mut self,
+        aggregate_id: &Self::Id,
+        event: &ValueAdded,
+        &(): &Self::Metadata,
+    ) {
         *self.totals.entry(aggregate_id.clone()).or_insert(0) += event.amount;
     }
 }
