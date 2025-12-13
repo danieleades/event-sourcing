@@ -324,7 +324,8 @@ impl ApplyProjection<SaleRefunded> for InventoryReport {
 // =============================================================================
 
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
@@ -332,23 +333,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Restock products
     println!("1. Restocking products...");
-    repository.execute_command::<Product, Restock>(
-        &"WIDGET-001".to_string(),
-        &Restock {
-            quantity: 100,
-            unit_price_cents: 2500,
-        },
-        &(),
-    )?;
+    repository
+        .execute_command::<Product, Restock>(
+            &"WIDGET-001".to_string(),
+            &Restock {
+                quantity: 100,
+                unit_price_cents: 2500,
+            },
+            &(),
+        )
+        .await?;
 
-    repository.execute_command::<Product, Restock>(
-        &"GADGET-002".to_string(),
-        &Restock {
-            quantity: 50,
-            unit_price_cents: 5000,
-        },
-        &(),
-    )?;
+    repository
+        .execute_command::<Product, Restock>(
+            &"GADGET-002".to_string(),
+            &Restock {
+                quantity: 50,
+                unit_price_cents: 5000,
+            },
+            &(),
+        )
+        .await?;
 
     // Make sales - using composite SaleId that encodes product reference
     println!("2. Processing sales...");
@@ -363,53 +368,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     .to_string();
 
-    repository.execute_command::<Sale, CompleteSale>(
-        &sale1_id,
-        &CompleteSale {
-            quantity: 10,
-            sale_price_cents: 2500,
-        },
-        &(),
-    )?;
+    repository
+        .execute_command::<Sale, CompleteSale>(
+            &sale1_id,
+            &CompleteSale {
+                quantity: 10,
+                sale_price_cents: 2500,
+            },
+            &(),
+        )
+        .await?;
 
-    repository.execute_command::<Sale, CompleteSale>(
-        &sale2_id,
-        &CompleteSale {
-            quantity: 5,
-            sale_price_cents: 5000,
-        },
-        &(),
-    )?;
+    repository
+        .execute_command::<Sale, CompleteSale>(
+            &sale2_id,
+            &CompleteSale {
+                quantity: 5,
+                sale_price_cents: 5000,
+            },
+            &(),
+        )
+        .await?;
 
     // Adjust inventory
     println!("3. Adjusting inventory for damaged goods...");
-    repository.execute_command::<Product, AdjustInventory>(
-        &"WIDGET-001".to_string(),
-        &AdjustInventory {
-            quantity_delta: -3,
-            reason: "damaged in warehouse".to_string(),
-        },
-        &(),
-    )?;
+    repository
+        .execute_command::<Product, AdjustInventory>(
+            &"WIDGET-001".to_string(),
+            &AdjustInventory {
+                quantity_delta: -3,
+                reason: "damaged in warehouse".to_string(),
+            },
+            &(),
+        )
+        .await?;
 
     // Process refund
     println!("4. Processing refund...");
-    repository.execute_command::<Sale, RefundSale>(
-        &sale1_id,
-        &RefundSale { amount_cents: 5000 },
-        &(),
-    )?;
+    repository
+        .execute_command::<Sale, RefundSale>(&sale1_id, &RefundSale { amount_cents: 5000 }, &())
+        .await?;
 
     // Additional restocking
     println!("5. Additional restocking...");
-    repository.execute_command::<Product, Restock>(
-        &"WIDGET-001".to_string(),
-        &Restock {
-            quantity: 25,
-            unit_price_cents: 2500,
-        },
-        &(),
-    )?;
+    repository
+        .execute_command::<Product, Restock>(
+            &"WIDGET-001".to_string(),
+            &Restock {
+                quantity: 25,
+                unit_price_cents: 2500,
+            },
+            &(),
+        )
+        .await?;
 
     // Load global report
     println!("\n6. Loading global inventory report...\n");
@@ -419,7 +430,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .event::<InventoryAdjusted>()
         .event::<SaleCompleted>()
         .event::<SaleRefunded>()
-        .load()?;
+        .load()
+        .await?;
 
     // Display report
     println!("=== INVENTORY REPORT ===");

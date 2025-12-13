@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::future::Future;
 
 use crate::store::StreamKey;
 
@@ -45,16 +46,16 @@ pub struct Snapshot<Pos> {
 /// - Always save: useful for aggregates with expensive replay
 /// - Every N events: balance between storage and replay cost
 /// - Never save: read-only replicas that only load snapshots created elsewhere
-pub trait SnapshotStore {
+pub trait SnapshotStore: Send + Sync {
     /// Aggregate identifier type.
     ///
     /// Must match the `EventStore::Id` type used in the same repository.
-    type Id;
+    type Id: Send + Sync + 'static;
 
     /// Position type for tracking snapshot positions.
     ///
     /// Must match the `EventStore::Position` type used in the same repository.
-    type Position;
+    type Position: Send + Sync + 'static;
 
     /// Error type for snapshot operations.
     type Error: std::error::Error + Send + Sync + 'static;
@@ -66,11 +67,11 @@ pub trait SnapshotStore {
     /// # Errors
     ///
     /// Returns an error if the underlying storage fails.
-    fn load(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
+    fn load<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>> + Send + 'a;
 
     /// Whether a snapshot should be taken.
     ///
@@ -98,13 +99,13 @@ pub trait SnapshotStore {
     /// # Errors
     ///
     /// Returns an error if persistence fails.
-    fn offer_snapshot(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn offer_snapshot<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         snapshot: Snapshot<Self::Position>,
         events_since_last_snapshot: u64,
-    ) -> Result<(), Self::Error>;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 }
 
 /// No-op snapshot store for backwards compatibility.
@@ -127,27 +128,31 @@ impl<Id, Pos> NoSnapshots<Id, Pos> {
     }
 }
 
-impl<Id, Pos> SnapshotStore for NoSnapshots<Id, Pos> {
+impl<Id, Pos> SnapshotStore for NoSnapshots<Id, Pos>
+where
+    Id: Send + Sync + 'static,
+    Pos: Send + Sync + 'static,
+{
     type Id = Id;
     type Position = Pos;
     type Error = Infallible;
 
-    fn load(
-        &self,
-        _aggregate_kind: &str,
-        _aggregate_id: &Self::Id,
-    ) -> Result<Option<Snapshot<Pos>>, Self::Error> {
-        Ok(None)
+    fn load<'a>(
+        &'a self,
+        _aggregate_kind: &'a str,
+        _aggregate_id: &'a Self::Id,
+    ) -> impl Future<Output = Result<Option<Snapshot<Pos>>, Self::Error>> + Send + 'a {
+        std::future::ready(Ok(None))
     }
 
-    fn offer_snapshot(
-        &mut self,
-        _aggregate_kind: &str,
-        _aggregate_id: &Self::Id,
+    fn offer_snapshot<'a>(
+        &'a mut self,
+        _aggregate_kind: &'a str,
+        _aggregate_id: &'a Self::Id,
         _snapshot: Snapshot<Pos>,
         _events_since_last_snapshot: u64,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
+        std::future::ready(Ok(()))
     }
 
     fn should_snapshot(
@@ -282,23 +287,23 @@ impl<Id, Pos> Default for InMemorySnapshotStore<Id, Pos> {
 
 impl<Id, Pos> SnapshotStore for InMemorySnapshotStore<Id, Pos>
 where
-    Id: Clone + Eq + std::hash::Hash,
-    Pos: Clone,
+    Id: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+    Pos: Clone + Send + Sync + 'static,
 {
     type Id = Id;
     type Position = Pos;
     type Error = Infallible;
 
     #[tracing::instrument(skip(self, aggregate_id))]
-    fn load(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Snapshot<Pos>>, Self::Error> {
+    fn load<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl Future<Output = Result<Option<Snapshot<Pos>>, Self::Error>> + Send + 'a {
         let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         let snapshot = self.snapshots.get(&key).cloned();
         tracing::trace!(found = snapshot.is_some(), "snapshot lookup");
-        Ok(snapshot)
+        std::future::ready(Ok(snapshot))
     }
 
     fn should_snapshot(
@@ -311,13 +316,13 @@ where
     }
 
     #[tracing::instrument(skip(self, aggregate_id, snapshot))]
-    fn offer_snapshot(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn offer_snapshot<'a>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         snapshot: Snapshot<Pos>,
         events_since_last_snapshot: u64,
-    ) -> Result<(), Self::Error> {
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
         debug_assert!(
             self.policy.should_snapshot(events_since_last_snapshot),
             "offer_snapshot called when policy declined"
@@ -326,6 +331,6 @@ where
         let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         self.snapshots.insert(key, snapshot);
         tracing::debug!(events_since_last_snapshot, "snapshot saved");
-        Ok(())
+        std::future::ready(Ok(()))
     }
 }

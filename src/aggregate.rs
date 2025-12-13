@@ -108,7 +108,7 @@ pub trait Handle<C>: Aggregate {
 /// Builder for loading aggregates by ID.
 pub struct AggregateBuilder<'a, R, A> {
     pub(super) repository: &'a R,
-    pub(super) _phantom: PhantomData<A>,
+    pub(super) _phantom: PhantomData<fn() -> A>,
 }
 
 impl<'a, R, A> AggregateBuilder<'a, R, A> {
@@ -134,14 +134,14 @@ where
     /// # Errors
     ///
     /// Returns an error if the store fails to load events or if events cannot be deserialized.
-    pub fn load(
+    pub async fn load(
         self,
         id: &S::Id,
     ) -> Result<A, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
     where
         A::Event: ProjectionEvent,
     {
-        self.repository.load::<A>(id)
+        self.repository.load::<A>(id).await
     }
 }
 
@@ -161,13 +161,13 @@ where
     ///
     /// Returns an error if events cannot be deserialized or a stored snapshot cannot
     /// be deserialized (which indicates snapshot data corruption).
-    pub fn load(
+    pub async fn load(
         self,
         id: &S::Id,
     ) -> Result<A, ProjectionError<S::Error, <S::Codec as Codec>::Error>>
     where
         A::Event: ProjectionEvent,
     {
-        self.repository.load::<A>(id)
+        self.repository.load::<A>(id).await
     }
 }

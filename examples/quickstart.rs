@@ -71,23 +71,23 @@ impl ApplyProjection<FundsDeposited> for TotalDeposits {
 // ANCHOR_END: projection
 
 // ANCHOR: main
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an in-memory store
     let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     // Execute a command
-    repository.execute_command::<Account, Deposit>(
-        &"ACC-001".to_string(),
-        &Deposit { amount: 100 },
-        &(),
-    )?;
+    repository
+        .execute_command::<Account, Deposit>(&"ACC-001".to_string(), &Deposit { amount: 100 }, &())
+        .await?;
 
     // Build a projection
     let totals = repository
         .build_projection::<TotalDeposits>()
         .event::<FundsDeposited>()
-        .load()?;
+        .load()
+        .await?;
 
     println!("Total deposits: {}", totals.total);
     assert_eq!(totals.total, 100);

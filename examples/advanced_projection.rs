@@ -155,7 +155,8 @@ impl ApplyProjection<PromotionApplied> for ProductSummary {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
@@ -164,45 +165,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let promotion_id = String::from("promo-42");
 
     // Seed the store using the test utilities.
-    repository.seed_events::<Product>(
-        &product_id,
-        vec![
-            ProductRestocked {
-                sku: "SKU-007".into(),
-                quantity: 50,
-            }
-            .into(),
-            InventoryAdjusted {
-                sku: "SKU-007".into(),
-                delta: -5,
-            }
-            .into(),
-        ],
-    )?;
+    repository
+        .seed_events::<Product>(
+            &product_id,
+            vec![
+                ProductRestocked {
+                    sku: "SKU-007".into(),
+                    quantity: 50,
+                }
+                .into(),
+                InventoryAdjusted {
+                    sku: "SKU-007".into(),
+                    delta: -5,
+                }
+                .into(),
+            ],
+        )
+        .await?;
 
-    repository.seed_events::<Sale>(
-        &sale_id,
-        vec![
-            SaleCompleted {
-                sale_id: "sale-123".into(),
-                product_sku: "SKU-007".into(),
-                quantity: 2,
-            }
-            .into(),
-        ],
-    )?;
+    repository
+        .seed_events::<Sale>(
+            &sale_id,
+            vec![
+                SaleCompleted {
+                    sale_id: "sale-123".into(),
+                    product_sku: "SKU-007".into(),
+                    quantity: 2,
+                }
+                .into(),
+            ],
+        )
+        .await?;
 
-    repository.seed_events::<Promotion>(
-        &promotion_id,
-        vec![
-            PromotionApplied {
-                promotion_id: "promo-42".into(),
-                product_sku: "SKU-007".into(),
-                amount_cents: 300,
-            }
-            .into(),
-        ],
-    )?;
+    repository
+        .seed_events::<Promotion>(
+            &promotion_id,
+            vec![
+                PromotionApplied {
+                    promotion_id: "promo-42".into(),
+                    product_sku: "SKU-007".into(),
+                    amount_cents: 300,
+                }
+                .into(),
+            ],
+        )
+        .await?;
 
     // Build the projection with mixed filters.
     let summary = repository
@@ -211,7 +218,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .event_for::<Product, InventoryAdjusted>(&product_id)
         .event_for::<Sale, SaleCompleted>(&sale_id)
         .event_for::<Promotion, PromotionApplied>(&promotion_id)
-        .load()?;
+        .load()
+        .await?;
 
     println!("Product summary: {summary:#?}");
 

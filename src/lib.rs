@@ -354,7 +354,7 @@ mod tests {
             InMemoryEventStore::new(JsonCodec)
         }
 
-        fn append_event(
+        async fn append_event(
             store: &mut InMemoryEventStore<String, JsonCodec, ()>,
             aggregate_kind: &str,
             aggregate_id: &str,
@@ -368,18 +368,19 @@ mod tests {
             }];
             store
                 .append(aggregate_kind, &aggregate_id.to_string(), None, events)
+                .await
                 .unwrap();
         }
 
-        #[test]
-        fn append_and_load_single_event() {
+        #[tokio::test]
+        async fn append_and_load_single_event() {
             let mut store = create_store();
             let data = br#"{"amount":10}"#;
 
-            append_event(&mut store, "counter", "c1", "value-added", data);
+            append_event(&mut store, "counter", "c1", "value-added", data).await;
 
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].aggregate_kind, "counter");
@@ -388,8 +389,8 @@ mod tests {
             assert_eq!(events[0].data, data);
         }
 
-        #[test]
-        fn append_batch_multiple_events() {
+        #[tokio::test]
+        async fn append_batch_multiple_events() {
             let mut store = create_store();
             let events = vec![
                 PersistableEvent {
@@ -406,67 +407,68 @@ mod tests {
 
             store
                 .append("counter", &"c1".to_string(), None, events)
+                .await
                 .unwrap();
 
             let filters = vec![
                 EventFilter::for_aggregate("value-added", "counter", "c1"),
                 EventFilter::for_aggregate("value-subtracted", "counter", "c1"),
             ];
-            let loaded = store.load_events(&filters).unwrap();
+            let loaded = store.load_events(&filters).await.unwrap();
 
             assert_eq!(loaded.len(), 2);
             assert_eq!(loaded[0].kind, "value-added");
             assert_eq!(loaded[1].kind, "value-subtracted");
         }
 
-        #[test]
-        fn load_empty_returns_empty_vec() {
+        #[tokio::test]
+        async fn load_empty_returns_empty_vec() {
             let store = create_store();
             let filters = vec![EventFilter::for_event("nonexistent")];
 
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             assert!(events.is_empty());
         }
 
-        #[test]
-        fn load_filters_by_event_kind() {
+        #[tokio::test]
+        async fn load_filters_by_event_kind() {
             let mut store = create_store();
-            append_event(&mut store, "counter", "c1", "value-added", b"{}");
-            append_event(&mut store, "counter", "c1", "value-subtracted", b"{}");
+            append_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+            append_event(&mut store, "counter", "c1", "value-subtracted", b"{}").await;
 
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].kind, "value-added");
         }
 
-        #[test]
-        fn load_filters_by_aggregate() {
+        #[tokio::test]
+        async fn load_filters_by_aggregate() {
             let mut store = create_store();
-            append_event(&mut store, "counter", "c1", "value-added", b"{}");
-            append_event(&mut store, "counter", "c2", "value-added", b"{}");
+            append_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+            append_event(&mut store, "counter", "c2", "value-added", b"{}").await;
 
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].aggregate_id, "c1");
         }
 
-        #[test]
-        fn global_position_ordering() {
+        #[tokio::test]
+        async fn global_position_ordering() {
             let mut store = create_store();
 
             // Add events to different streams
-            append_event(&mut store, "counter", "c1", "value-added", b"{}");
-            append_event(&mut store, "counter", "c2", "value-added", b"{}");
-            append_event(&mut store, "counter", "c1", "value-added", b"{}");
+            append_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+            append_event(&mut store, "counter", "c2", "value-added", b"{}").await;
+            append_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
             // Load all value-added events across all counters
             let filters = vec![EventFilter::for_event("value-added")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             assert_eq!(events.len(), 3);
             // Events should be sorted by global position
@@ -478,46 +480,49 @@ mod tests {
             assert_eq!(events[2].aggregate_id, "c1");
         }
 
-        #[test]
-        fn deduplication_when_filters_overlap() {
+        #[tokio::test]
+        async fn deduplication_when_filters_overlap() {
             let mut store = create_store();
-            append_event(&mut store, "counter", "c1", "value-added", b"{}");
+            append_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
             // Create overlapping filters: one specific, one global
             let filters = vec![
                 EventFilter::for_aggregate("value-added", "counter", "c1"),
                 EventFilter::for_event("value-added"),
             ];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             // Should only get one event, not two
             assert_eq!(events.len(), 1);
         }
 
-        #[test]
-        fn positions_are_globally_unique() {
+        #[tokio::test]
+        async fn positions_are_globally_unique() {
             let mut store = create_store();
 
-            append_event(&mut store, "a", "1", "e", b"{}");
-            append_event(&mut store, "b", "2", "e", b"{}");
-            append_event(&mut store, "a", "1", "e", b"{}");
+            append_event(&mut store, "a", "1", "e", b"{}").await;
+            append_event(&mut store, "b", "2", "e", b"{}").await;
+            append_event(&mut store, "a", "1", "e", b"{}").await;
 
             let filters = vec![EventFilter::for_event("e")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
 
             let positions: Vec<u64> = events.iter().map(|e| e.position).collect();
             assert_eq!(positions, vec![0, 1, 2]);
         }
 
-        #[test]
-        fn version_checking_detects_conflict() {
+        #[tokio::test]
+        async fn version_checking_detects_conflict() {
             let mut store = create_store();
 
             // Append first event
-            append_event(&mut store, "counter", "c1", "value-added", b"{}");
+            append_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
             // Get current version
-            let version = store.stream_version("counter", &"c1".to_string()).unwrap();
+            let version = store
+                .stream_version("counter", &"c1".to_string())
+                .await
+                .unwrap();
             assert_eq!(version, Some(0));
 
             // Append with correct expected version
@@ -526,7 +531,9 @@ mod tests {
                 data: b"{}".to_vec(),
                 metadata: (),
             }];
-            let result = store.append("counter", &"c1".to_string(), Some(0), events);
+            let result = store
+                .append("counter", &"c1".to_string(), Some(0), events)
+                .await;
             assert!(result.is_ok());
 
             // Try to append with stale version
@@ -535,16 +542,19 @@ mod tests {
                 data: b"{}".to_vec(),
                 metadata: (),
             }];
-            let result = store.append("counter", &"c1".to_string(), Some(0), events);
+            let result = store
+                .append("counter", &"c1".to_string(), Some(0), events)
+                .await;
             assert!(matches!(result, Err(AppendError::Conflict(_))));
         }
 
-        #[test]
-        fn stream_version_returns_none_for_empty_stream() {
+        #[tokio::test]
+        async fn stream_version_returns_none_for_empty_stream() {
             let store = create_store();
 
             let version = store
                 .stream_version("counter", &"nonexistent".to_string())
+                .await
                 .unwrap();
             assert_eq!(version, None);
         }
@@ -557,8 +567,8 @@ mod tests {
     mod transaction {
         use super::*;
 
-        #[test]
-        fn commit_persists_events() {
+        #[tokio::test]
+        async fn commit_persists_events() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
 
@@ -566,16 +576,16 @@ mod tests {
                 let mut tx = store.begin::<Unchecked>("counter", "c1".to_string(), None);
                 tx.append(CounterEvent::Added(ValueAdded { amount: 10 }), ())
                     .unwrap();
-                tx.commit().unwrap();
+                tx.commit().await.unwrap();
             }
 
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
             assert_eq!(events.len(), 1);
         }
 
-        #[test]
-        fn drop_discards_uncommitted_events() {
+        #[tokio::test]
+        async fn drop_discards_uncommitted_events() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
 
@@ -587,12 +597,12 @@ mod tests {
             }
 
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
             assert!(events.is_empty());
         }
 
-        #[test]
-        fn append_multiple_events_in_transaction() {
+        #[tokio::test]
+        async fn append_multiple_events_in_transaction() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
 
@@ -602,19 +612,19 @@ mod tests {
                     .unwrap();
                 tx.append(CounterEvent::Subtracted(ValueSubtracted { amount: 5 }), ())
                     .unwrap();
-                tx.commit().unwrap();
+                tx.commit().await.unwrap();
             }
 
             let filters = vec![
                 EventFilter::for_aggregate("value-added", "counter", "c1"),
                 EventFilter::for_aggregate("value-subtracted", "counter", "c1"),
             ];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
             assert_eq!(events.len(), 2);
         }
 
-        #[test]
-        fn optimistic_transaction_detects_conflict() {
+        #[tokio::test]
+        async fn optimistic_transaction_detects_conflict() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
 
@@ -623,7 +633,7 @@ mod tests {
                 let mut tx = store.begin::<Unchecked>("counter", "c1".to_string(), None);
                 tx.append(CounterEvent::Added(ValueAdded { amount: 10 }), ())
                     .unwrap();
-                tx.commit().unwrap();
+                tx.commit().await.unwrap();
             }
 
             // Simulate a conflict: append with stale expected version
@@ -639,6 +649,7 @@ mod tests {
                         metadata: (),
                     }],
                 )
+                .await
                 .unwrap();
 
             // Now try to append with expected version 0 (stale)
@@ -647,7 +658,7 @@ mod tests {
                 .unwrap();
 
             // Commit should fail due to version mismatch
-            let result = tx.commit();
+            let result = tx.commit().await;
             assert!(matches!(result, Err(AppendError::Conflict(_))));
         }
     }
@@ -671,39 +682,43 @@ mod tests {
             Repository::new(InMemoryEventStore::new(JsonCodec))
         }
 
-        #[test]
-        fn execute_command_success() {
+        #[tokio::test]
+        async fn execute_command_success() {
             let mut repo = create_repository();
 
-            let result = repo.execute_command::<Counter, AddValue>(
-                &"c1".to_string(),
-                &AddValue { amount: 10 },
-                &(),
-            );
+            let result = repo
+                .execute_command::<Counter, AddValue>(
+                    &"c1".to_string(),
+                    &AddValue { amount: 10 },
+                    &(),
+                )
+                .await;
 
             assert!(result.is_ok());
 
             // Verify events were persisted
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = repo.event_store().load_events(&filters).unwrap();
+            let events = repo.event_store().load_events(&filters).await.unwrap();
             assert_eq!(events.len(), 1);
         }
 
-        #[test]
-        fn execute_command_aggregate_error() {
+        #[tokio::test]
+        async fn execute_command_aggregate_error() {
             let mut repo = create_repository();
 
-            let result = repo.execute_command::<Counter, AddValue>(
-                &"c1".to_string(),
-                &AddValue { amount: -5 }, // Invalid: negative amount
-                &(),
-            );
+            let result = repo
+                .execute_command::<Counter, AddValue>(
+                    &"c1".to_string(),
+                    &AddValue { amount: -5 }, // Invalid: negative amount
+                    &(),
+                )
+                .await;
 
             assert!(matches!(result, Err(OptimisticCommandError::Aggregate(_))));
         }
 
-        #[test]
-        fn execute_command_empty_events_skips_persistence() {
+        #[tokio::test]
+        async fn execute_command_empty_events_skips_persistence() {
             let mut repo = create_repository();
 
             // First, add some value
@@ -712,16 +727,18 @@ mod tests {
                 &AddValue { amount: 10 },
                 &(),
             )
+            .await
             .unwrap();
 
-            let result =
-                repo.execute_command::<Counter, NoOpCommand>(&"c1".to_string(), &NoOpCommand, &());
+            let result = repo
+                .execute_command::<Counter, NoOpCommand>(&"c1".to_string(), &NoOpCommand, &())
+                .await;
 
             assert!(result.is_ok());
         }
 
-        #[test]
-        fn load_aggregate_rebuilds_state() {
+        #[tokio::test]
+        async fn load_aggregate_rebuilds_state() {
             let mut repo = create_repository();
 
             // Execute multiple commands
@@ -730,34 +747,41 @@ mod tests {
                 &AddValue { amount: 10 },
                 &(),
             )
+            .await
             .unwrap();
             repo.execute_command::<Counter, AddValue>(
                 &"c1".to_string(),
                 &AddValue { amount: 5 },
                 &(),
             )
+            .await
             .unwrap();
 
             // Load aggregate and verify state
-            let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();
+            let counter: Counter = repo
+                .aggregate_builder()
+                .load(&"c1".to_string())
+                .await
+                .unwrap();
 
             assert_eq!(counter.value, 15);
         }
 
-        #[test]
-        fn load_aggregate_for_nonexistent_returns_default() {
+        #[tokio::test]
+        async fn load_aggregate_for_nonexistent_returns_default() {
             let repo = create_repository();
 
             let counter: Counter = repo
                 .aggregate_builder()
                 .load(&"nonexistent".to_string())
+                .await
                 .unwrap();
 
             assert_eq!(counter.value, 0);
         }
 
-        #[test]
-        fn build_projection_applies_events() {
+        #[tokio::test]
+        async fn build_projection_applies_events() {
             let mut repo = create_repository();
 
             // Add events to multiple aggregates
@@ -766,12 +790,14 @@ mod tests {
                 &AddValue { amount: 10 },
                 &(),
             )
+            .await
             .unwrap();
             repo.execute_command::<Counter, AddValue>(
                 &"c2".to_string(),
                 &AddValue { amount: 20 },
                 &(),
             )
+            .await
             .unwrap();
 
             // Build projection
@@ -779,14 +805,15 @@ mod tests {
                 .build_projection()
                 .event::<ValueAdded>()
                 .load()
+                .await
                 .unwrap();
 
             assert_eq!(projection.totals.get("c1"), Some(&10));
             assert_eq!(projection.totals.get("c2"), Some(&20));
         }
 
-        #[test]
-        fn build_projection_can_subscribe_to_event_enum() {
+        #[tokio::test]
+        async fn build_projection_can_subscribe_to_event_enum() {
             let mut repo = create_repository();
 
             repo.execute_command::<Counter, AddValue>(
@@ -794,58 +821,66 @@ mod tests {
                 &AddValue { amount: 10 },
                 &(),
             )
+            .await
             .unwrap();
             repo.execute_command::<Counter, SubtractValue>(
                 &"c1".to_string(),
                 &SubtractValue { amount: 3 },
                 &(),
             )
+            .await
             .unwrap();
             repo.execute_command::<Counter, AddValue>(
                 &"c2".to_string(),
                 &AddValue { amount: 20 },
                 &(),
             )
+            .await
             .unwrap();
 
             let projection: CounterProjection = repo
                 .build_projection()
                 .events::<CounterEvent>()
                 .load()
+                .await
                 .unwrap();
 
             assert_eq!(projection.totals.get("c1"), Some(&7));
             assert_eq!(projection.totals.get("c2"), Some(&20));
         }
 
-        #[test]
-        fn build_projection_can_subscribe_to_event_enum_for_one_stream() {
+        #[tokio::test]
+        async fn build_projection_can_subscribe_to_event_enum_for_one_stream() {
             let mut repo = create_repository();
             let c1 = "c1".to_string();
 
             repo.execute_command::<Counter, AddValue>(&c1, &AddValue { amount: 10 }, &())
+                .await
                 .unwrap();
             repo.execute_command::<Counter, SubtractValue>(&c1, &SubtractValue { amount: 3 }, &())
+                .await
                 .unwrap();
             repo.execute_command::<Counter, AddValue>(
                 &"c2".to_string(),
                 &AddValue { amount: 20 },
                 &(),
             )
+            .await
             .unwrap();
 
             let projection: CounterProjection = repo
                 .build_projection()
                 .events_for::<Counter>(&c1)
                 .load()
+                .await
                 .unwrap();
 
             assert_eq!(projection.totals.get("c1"), Some(&7));
             assert_eq!(projection.totals.get("c2"), None);
         }
 
-        #[test]
-        fn command_validation_uses_current_state() {
+        #[tokio::test]
+        async fn command_validation_uses_current_state() {
             let mut repo = create_repository();
 
             // Add 10
@@ -854,29 +889,34 @@ mod tests {
                 &AddValue { amount: 10 },
                 &(),
             )
+            .await
             .unwrap();
 
             // Try to subtract 15 (should fail - insufficient value)
-            let result = repo.execute_command::<Counter, SubtractValue>(
-                &"c1".to_string(),
-                &SubtractValue { amount: 15 },
-                &(),
-            );
+            let result = repo
+                .execute_command::<Counter, SubtractValue>(
+                    &"c1".to_string(),
+                    &SubtractValue { amount: 15 },
+                    &(),
+                )
+                .await;
 
             assert!(matches!(result, Err(OptimisticCommandError::Aggregate(_))));
 
             // Subtract 5 (should succeed)
-            let result = repo.execute_command::<Counter, SubtractValue>(
-                &"c1".to_string(),
-                &SubtractValue { amount: 5 },
-                &(),
-            );
+            let result = repo
+                .execute_command::<Counter, SubtractValue>(
+                    &"c1".to_string(),
+                    &SubtractValue { amount: 5 },
+                    &(),
+                )
+                .await;
 
             assert!(result.is_ok());
         }
 
-        #[test]
-        fn optimistic_repository_detects_conflict() {
+        #[tokio::test]
+        async fn optimistic_repository_detects_conflict() {
             let store = InMemoryEventStore::new(JsonCodec);
             let mut repo = Repository::new(store); // Optimistic concurrency is the default
 
@@ -886,6 +926,7 @@ mod tests {
                 &AddValue { amount: 10 },
                 &(),
             )
+            .await
             .unwrap();
 
             // Simulate conflict by injecting a concurrent event
@@ -893,17 +934,20 @@ mod tests {
                 &"c1".to_string(),
                 CounterEvent::Added(ValueAdded { amount: 5 }),
             )
+            .await
             .unwrap();
 
             // Now execute command - should detect conflict since we loaded stale data
             // (We need to load first, then have a concurrent write, then try to commit)
             // This test is tricky because execute_command does load+commit atomically
             // Let's verify the optimistic error type exists at least
-            let result = repo.execute_command::<Counter, AddValue>(
-                &"c1".to_string(),
-                &AddValue { amount: 5 },
-                &(),
-            );
+            let result = repo
+                .execute_command::<Counter, AddValue>(
+                    &"c1".to_string(),
+                    &AddValue { amount: 5 },
+                    &(),
+                )
+                .await;
 
             // This should succeed because we re-load fresh each time
             assert!(result.is_ok());
@@ -934,11 +978,12 @@ mod tests {
                 self.inner.codec()
             }
 
-            fn stream_version(
-                &self,
-                aggregate_kind: &str,
-                aggregate_id: &Self::Id,
-            ) -> Result<Option<Self::Position>, Self::Error> {
+            fn stream_version<'a>(
+                &'a self,
+                aggregate_kind: &'a str,
+                aggregate_id: &'a Self::Id,
+            ) -> impl std::future::Future<Output = Result<Option<Self::Position>, Self::Error>> + Send + 'a
+            {
                 self.inner.stream_version(aggregate_kind, aggregate_id)
             }
 
@@ -956,29 +1001,39 @@ mod tests {
                 )
             }
 
-            fn append(
-                &mut self,
-                aggregate_kind: &str,
-                aggregate_id: &Self::Id,
+            fn append<'a>(
+                &'a mut self,
+                aggregate_kind: &'a str,
+                aggregate_id: &'a Self::Id,
                 expected_version: Option<Self::Position>,
                 events: Vec<PersistableEvent<Self::Metadata>>,
-            ) -> Result<(), AppendError<Self::Position, Self::Error>> {
+            ) -> impl std::future::Future<
+                Output = Result<(), AppendError<Self::Position, Self::Error>>,
+            > + Send
+            + 'a {
                 self.inner
                     .append(aggregate_kind, aggregate_id, expected_version, events)
             }
 
-            fn load_events(
-                &self,
-                filters: &[EventFilter<Self::Id, Self::Position>],
-            ) -> crate::store::LoadEventsResult<Self::Id, Self::Position, Self::Metadata, Self::Error>
-            {
+            fn load_events<'a>(
+                &'a self,
+                filters: &'a [EventFilter<Self::Id, Self::Position>],
+            ) -> impl std::future::Future<
+                Output = crate::store::LoadEventsResult<
+                    Self::Id,
+                    Self::Position,
+                    Self::Metadata,
+                    Self::Error,
+                >,
+            > + Send
+            + 'a {
                 self.inner.load_events(filters)
             }
 
-            fn append_expecting_new(
-                &mut self,
-                aggregate_kind: &str,
-                aggregate_id: &Self::Id,
+            async fn append_expecting_new<'a>(
+                &'a mut self,
+                aggregate_kind: &'a str,
+                aggregate_id: &'a Self::Id,
                 events: Vec<PersistableEvent<Self::Metadata>>,
             ) -> Result<(), AppendError<Self::Position, Self::Error>> {
                 if self.conflict_next_append_expecting_new {
@@ -992,11 +1047,12 @@ mod tests {
 
                 self.inner
                     .append_expecting_new(aggregate_kind, aggregate_id, events)
+                    .await
             }
         }
 
-        #[test]
-        fn execute_with_retry_retries_on_concurrency_conflict() {
+        #[tokio::test]
+        async fn execute_with_retry_retries_on_concurrency_conflict() {
             let store = ConflictOnceStore::new();
             let mut repo = Repository::new(store);
 
@@ -1007,6 +1063,7 @@ mod tests {
                     &(),
                     3,
                 )
+                .await
                 .unwrap();
 
             assert_eq!(attempts, 2);
@@ -1120,8 +1177,8 @@ mod tests {
     mod direct_append {
         use super::*;
 
-        #[test]
-        fn directly_appended_events_are_loaded_correctly() {
+        #[tokio::test]
+        async fn directly_appended_events_are_loaded_correctly() {
             let mut store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
 
@@ -1137,11 +1194,12 @@ mod tests {
                         metadata: (),
                     }],
                 )
+                .await
                 .unwrap();
 
             // Check what's in the store
             let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
-            let events = store.load_events(&filters).unwrap();
+            let events = store.load_events(&filters).await.unwrap();
             println!("Events in store: {}", events.len());
             for e in &events {
                 println!(
@@ -1155,7 +1213,11 @@ mod tests {
 
             // Load via repository
             let repo = Repository::new(store);
-            let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();
+            let counter: Counter = repo
+                .aggregate_builder()
+                .load(&"c1".to_string())
+                .await
+                .unwrap();
             println!("Counter value: {}", counter.value);
 
             assert_eq!(
@@ -1164,8 +1226,8 @@ mod tests {
             );
         }
 
-        #[test]
-        fn mixed_repository_and_direct_appends_load_correctly() {
+        #[tokio::test]
+        async fn mixed_repository_and_direct_appends_load_correctly() {
             let store: InMemoryEventStore<String, JsonCodec, ()> =
                 InMemoryEventStore::new(JsonCodec);
             let mut repo = Repository::new(store);
@@ -1176,10 +1238,15 @@ mod tests {
                 &AddValue { amount: 100 },
                 &(),
             )
+            .await
             .unwrap();
 
             // Check aggregate value after first command
-            let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();
+            let counter: Counter = repo
+                .aggregate_builder()
+                .load(&"c1".to_string())
+                .await
+                .unwrap();
             println!("After repo command: {}", counter.value);
             assert_eq!(counter.value, 100);
 
@@ -1188,10 +1255,15 @@ mod tests {
                 &"c1".to_string(),
                 CounterEvent::Added(ValueAdded { amount: 50 }),
             )
+            .await
             .unwrap();
 
             // Load aggregate again - should now be 150
-            let counter: Counter = repo.aggregate_builder().load(&"c1".to_string()).unwrap();
+            let counter: Counter = repo
+                .aggregate_builder()
+                .load(&"c1".to_string())
+                .await
+                .unwrap();
             println!("After direct append: {}", counter.value);
             assert_eq!(
                 counter.value, 150,
