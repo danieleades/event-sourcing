@@ -3,8 +3,6 @@
 //! This module defines the building blocks for aggregates: state reconstruction
 //! (`Apply`), command handling (`Handle`), and loading (`AggregateBuilder`).
 //! The `#[derive(Aggregate)]` macro lives here to keep domain ergonomics in one spot.
-// Re-export the derive macros so users only need one import
-pub use event_sourcing_macros::Aggregate;
 
 use std::marker::PhantomData;
 

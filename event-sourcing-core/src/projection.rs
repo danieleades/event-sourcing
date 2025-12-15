@@ -325,3 +325,30 @@ where
         Ok(projection)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+    use std::io;
+
+    #[test]
+    fn projection_error_display_store_mentions_loading() {
+        let error: ProjectionError<io::Error, io::Error> =
+            ProjectionError::Store(io::Error::new(io::ErrorKind::NotFound, "not found"));
+        let msg = error.to_string();
+        assert!(msg.contains("failed to load events"));
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn projection_error_display_codec_includes_event_kind() {
+        let error: ProjectionError<io::Error, io::Error> = ProjectionError::Codec {
+            event_kind: "test-event".to_string(),
+            error: io::Error::new(io::ErrorKind::InvalidData, "bad data"),
+        };
+        let msg = error.to_string();
+        assert!(msg.contains("failed to decode event kind `test-event`"));
+        assert!(error.source().is_some());
+    }
+}

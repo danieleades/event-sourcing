@@ -6,10 +6,10 @@
 //!
 //! Run with: `cargo run --example optimistic_concurrency`
 
+use event_sourcing::repository::OptimisticCommandError;
+use event_sourcing::store::{InMemoryEventStore, JsonCodec};
 use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{
-    Apply, DomainEvent, Handle, InMemoryEventStore, JsonCodec, OptimisticCommandError, Repository,
-};
+use event_sourcing::{Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

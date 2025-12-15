@@ -12,8 +12,9 @@
 //! Run with: `cargo run --example snapshotting`
 
 use event_sourcing::{
-    Aggregate, Apply, DomainEvent, Handle, InMemoryEventStore, InMemorySnapshotStore, JsonCodec,
-    Repository,
+    Aggregate, Apply, DomainEvent, Handle, Repository,
+    snapshot::InMemorySnapshotStore,
+    store::{InMemoryEventStore, JsonCodec},
 };
 use serde::{Deserialize, Serialize};
 

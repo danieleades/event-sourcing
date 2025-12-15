@@ -13,8 +13,8 @@
 //! - **External IDs**: Aggregates treat IDs as infrastructure metadata supplied by the repository
 
 use event_sourcing::{
-    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec,
-    Projection, Repository,
+    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
+    store::{InMemoryEventStore, JsonCodec},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -326,7 +326,7 @@ impl ApplyProjection<SaleRefunded> for InventoryReport {
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store = InMemoryEventStore::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     println!("=== Inventory Management System ===\n");

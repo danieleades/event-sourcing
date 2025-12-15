@@ -709,3 +709,357 @@ impl crate::codec::Codec for JsonCodec {
         serde_json::from_slice(data)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_filter_for_event_is_unrestricted() {
+        let filter: EventFilter<String> = EventFilter::for_event("my-event");
+        assert_eq!(filter.event_kind, "my-event");
+        assert_eq!(filter.aggregate_kind, None);
+        assert_eq!(filter.aggregate_id, None);
+        assert_eq!(filter.after_position, None);
+    }
+
+    #[test]
+    fn event_filter_for_aggregate_is_restricted() {
+        let filter: EventFilter<String> =
+            EventFilter::for_aggregate("my-event", "my-aggregate", "123");
+        assert_eq!(filter.event_kind, "my-event");
+        assert_eq!(filter.aggregate_kind.as_deref(), Some("my-aggregate"));
+        assert_eq!(filter.aggregate_id.as_deref(), Some("123"));
+        assert_eq!(filter.after_position, None);
+    }
+
+    #[test]
+    fn event_filter_after_sets_after_position() {
+        let filter: EventFilter<String, u64> = EventFilter::for_event("e").after(10);
+        assert_eq!(filter.after_position, Some(10));
+    }
+
+    #[test]
+    fn json_codec_roundtrips() {
+        #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        struct ValueAdded {
+            amount: i32,
+        }
+
+        let codec = JsonCodec;
+        let value = ValueAdded { amount: 42 };
+        let bytes = codec.serialize(&value).unwrap();
+        let decoded: ValueAdded = codec.deserialize(&bytes).unwrap();
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn json_codec_rejects_invalid_json() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct ValueAdded {
+            amount: i32,
+        }
+
+        let codec = JsonCodec;
+        let result: Result<ValueAdded, _> = codec.deserialize(b"not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn json_codec_rejects_wrong_shape() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct ValueAdded {
+            amount: i32,
+        }
+
+        let codec = JsonCodec;
+        let result: Result<ValueAdded, _> = codec.deserialize(br#"{"wrong_field":123}"#);
+        assert!(result.is_err());
+    }
+
+    async fn append_raw_event(
+        store: &mut InMemoryEventStore<String, JsonCodec, ()>,
+        aggregate_kind: &str,
+        aggregate_id: &str,
+        event_kind: &str,
+        json_bytes: &[u8],
+    ) {
+        store
+            .append(
+                aggregate_kind,
+                &aggregate_id.to_string(),
+                None,
+                vec![PersistableEvent {
+                    kind: event_kind.to_string(),
+                    data: json_bytes.to_vec(),
+                    metadata: (),
+                }],
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_appends_and_loads_single_event() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        let data = br#"{"amount":10}"#;
+
+        append_raw_event(&mut store, "counter", "c1", "value-added", data).await;
+
+        let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
+        let events = store.load_events(&filters).await.unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].aggregate_kind, "counter");
+        assert_eq!(events[0].aggregate_id, "c1");
+        assert_eq!(events[0].kind, "value-added");
+        assert_eq!(events[0].data, data);
+        assert_eq!(events[0].position, 0);
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_loads_multiple_kinds_from_one_stream() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(
+            &mut store,
+            "counter",
+            "c1",
+            "value-added",
+            br#"{"amount":10}"#,
+        )
+        .await;
+        append_raw_event(
+            &mut store,
+            "counter",
+            "c1",
+            "value-subtracted",
+            br#"{"amount":5}"#,
+        )
+        .await;
+
+        let filters = vec![
+            EventFilter::for_aggregate("value-added", "counter", "c1"),
+            EventFilter::for_aggregate("value-subtracted", "counter", "c1"),
+        ];
+        let loaded = store.load_events(&filters).await.unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].kind, "value-added");
+        assert_eq!(loaded[1].kind, "value-subtracted");
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_returns_empty_when_no_events_match() {
+        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let events = store
+            .load_events(&[EventFilter::for_event("nonexistent")])
+            .await
+            .unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_filters_by_event_kind_and_aggregate_id() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+        append_raw_event(&mut store, "counter", "c2", "value-added", b"{}").await;
+
+        let filters = vec![EventFilter::for_aggregate("value-added", "counter", "c1")];
+        let events = store.load_events(&filters).await.unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].aggregate_id, "c1");
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_orders_events_by_global_position() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+        append_raw_event(&mut store, "counter", "c2", "value-added", b"{}").await;
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+
+        let events = store
+            .load_events(&[EventFilter::for_event("value-added")])
+            .await
+            .unwrap();
+
+        let positions: Vec<u64> = events.iter().map(|e| e.position).collect();
+        assert_eq!(positions, vec![0, 1, 2]);
+        assert_eq!(events[0].aggregate_id, "c1");
+        assert_eq!(events[1].aggregate_id, "c2");
+        assert_eq!(events[2].aggregate_id, "c1");
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_deduplicates_overlapping_filters() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+
+        let filters = vec![
+            EventFilter::for_aggregate("value-added", "counter", "c1"),
+            EventFilter::for_event("value-added"),
+        ];
+        let events = store.load_events(&filters).await.unwrap();
+        assert_eq!(events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_applies_after_position_filter() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 0
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 1
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 2
+
+        let events = store
+            .load_events(&[EventFilter::for_event("value-added").after(1)])
+            .await
+            .unwrap();
+
+        let positions: Vec<u64> = events.iter().map(|e| e.position).collect();
+        assert_eq!(positions, vec![2]);
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_stream_version_is_none_for_empty_stream() {
+        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let version = store
+            .stream_version("counter", &"nonexistent".to_string())
+            .await
+            .unwrap();
+        assert_eq!(version, None);
+    }
+
+    #[tokio::test]
+    async fn in_memory_event_store_version_checking_detects_conflict() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
+
+        let ok = store
+            .append(
+                "counter",
+                &"c1".to_string(),
+                Some(0),
+                vec![PersistableEvent {
+                    kind: "value-added".to_string(),
+                    data: b"{}".to_vec(),
+                    metadata: (),
+                }],
+            )
+            .await;
+        assert!(ok.is_ok());
+
+        let conflict = store
+            .append(
+                "counter",
+                &"c1".to_string(),
+                Some(0),
+                vec![PersistableEvent {
+                    kind: "value-added".to_string(),
+                    data: b"{}".to_vec(),
+                    metadata: (),
+                }],
+            )
+            .await;
+        assert!(matches!(conflict, Err(AppendError::Conflict(_))));
+    }
+
+    #[derive(Clone, Debug, serde::Serialize)]
+    struct TestAdded {
+        amount: i32,
+    }
+
+    #[derive(Clone, Debug)]
+    enum TestEvent {
+        Added(TestAdded),
+    }
+
+    impl crate::codec::SerializableEvent for TestEvent {
+        fn to_persistable<C: crate::codec::Codec, M>(
+            self,
+            codec: &C,
+            metadata: M,
+        ) -> Result<PersistableEvent<M>, C::Error> {
+            match self {
+                Self::Added(e) => Ok(PersistableEvent {
+                    kind: "added".to_string(),
+                    data: codec.serialize(&e)?,
+                    metadata,
+                }),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unchecked_transaction_commit_persists_events() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        let mut tx =
+            store.begin::<crate::concurrency::Unchecked>("counter", "c1".to_string(), None);
+        tx.append(TestEvent::Added(TestAdded { amount: 10 }), ())
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let events = store
+            .load_events(&[EventFilter::for_aggregate("added", "counter", "c1")])
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].position, 0);
+        assert_eq!(events[0].kind, "added");
+    }
+
+    #[tokio::test]
+    async fn dropping_transaction_without_commit_discards_buffered_events() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        {
+            let mut tx =
+                store.begin::<crate::concurrency::Unchecked>("counter", "c1".to_string(), None);
+            tx.append(TestEvent::Added(TestAdded { amount: 10 }), ())
+                .unwrap();
+        }
+
+        let events = store
+            .load_events(&[EventFilter::for_event("added")])
+            .await
+            .unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn optimistic_transaction_detects_stale_expected_version() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "added", br#"{"amount":10}"#).await;
+
+        let mut tx =
+            store.begin::<crate::concurrency::Optimistic>("counter", "c1".to_string(), Some(999));
+        tx.append(TestEvent::Added(TestAdded { amount: 1 }), ())
+            .unwrap();
+
+        let result = tx.commit().await;
+        assert!(matches!(result, Err(AppendError::Conflict(_))));
+    }
+
+    #[tokio::test]
+    async fn optimistic_transaction_detects_non_new_stream_when_expect_new() {
+        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
+            InMemoryEventStore::new(JsonCodec);
+        append_raw_event(&mut store, "counter", "c1", "added", br#"{"amount":10}"#).await;
+
+        let mut tx =
+            store.begin::<crate::concurrency::Optimistic>("counter", "c1".to_string(), None);
+        tx.append(TestEvent::Added(TestAdded { amount: 1 }), ())
+            .unwrap();
+
+        let result = tx.commit().await;
+        assert!(matches!(result, Err(AppendError::Conflict(_))));
+    }
+}

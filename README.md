@@ -77,7 +77,7 @@ the aggregate derive and the in-memory store.
 
 ```rust,no_run
 use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec,
+    Apply, ApplyProjection, DomainEvent, Handle, store::{InMemoryEventStore, JsonCodec},
     Projection, Repository,
 };
 use serde::{Deserialize, Serialize};

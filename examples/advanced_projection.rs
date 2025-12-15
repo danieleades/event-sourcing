@@ -12,10 +12,9 @@
 use std::collections::HashMap;
 
 use event_sourcing::Aggregate;
+use event_sourcing::store::{InMemoryEventStore, JsonCodec};
 use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, InMemoryEventStore, JsonCodec, Projection, Repository,
-};
+use event_sourcing::{Apply, ApplyProjection, DomainEvent, Projection, Repository};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

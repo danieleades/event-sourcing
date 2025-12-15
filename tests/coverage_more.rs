@@ -5,14 +5,13 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
-use event_sourcing::snapshot::{Snapshot, SnapshotStore};
-use event_sourcing::store::{EventStore, PersistableEvent};
+use event_sourcing::concurrency::ConcurrencyConflict;
+use event_sourcing::projection::ProjectionError;
+use event_sourcing::repository::{OptimisticCommandError, SnapshotCommandError};
+use event_sourcing::snapshot::{InMemorySnapshotStore, Snapshot, SnapshotStore};
+use event_sourcing::store::{EventStore, InMemoryEventStore, JsonCodec, PersistableEvent};
 use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{
-    Aggregate, ApplyProjection, ConcurrencyConflict, DomainEvent, Handle, InMemoryEventStore,
-    InMemorySnapshotStore, JsonCodec, OptimisticCommandError, Projection, ProjectionError,
-    Repository, SnapshotCommandError,
-};
+use event_sourcing::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

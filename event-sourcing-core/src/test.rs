@@ -61,10 +61,11 @@ use std::marker::PhantomData;
 
 use thiserror::Error;
 
+use crate::aggregate::{Aggregate, Handle};
 use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyStrategy, Unchecked};
+use crate::repository::{Repository, SnapshotRepository};
 use crate::store::{AppendError, EventStore, PersistableEvent};
-use crate::{Aggregate, Handle, Repository, SnapshotRepository};
 
 // =============================================================================
 // Repository Test Extension Trait
@@ -643,15 +644,39 @@ mod tests {
     fn default_creates_new_framework() {
         let _framework: TestFramework<Counter> = TestFramework::default();
     }
+
+    struct NoOp;
+
+    impl Handle<NoOp> for Counter {
+        fn handle(&self, _: &NoOp) -> Result<Vec<Self::Event>, Self::Error> {
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn no_op_command_produces_no_events() {
+        CounterTest::new()
+            .given_no_previous_events()
+            .when(&NoOp)
+            .then_expect_no_events();
+    }
+
+    #[test]
+    fn then_expect_error_eq_matches_error_value() {
+        CounterTest::new()
+            .given_no_previous_events()
+            .when(&AddValue { amount: -5 })
+            .then_expect_error_eq(&"amount must be positive".to_string());
+    }
 }
 
 #[cfg(test)]
 mod repository_test_ext_tests {
     use super::*;
     use crate::{
-        DomainEvent, InMemoryEventStore, JsonCodec,
         codec::{EventDecodeError, ProjectionEvent},
-        store::PersistableEvent,
+        event::DomainEvent,
+        store::{InMemoryEventStore, JsonCodec, PersistableEvent},
     };
 
     // Test fixtures with SerializableEvent implementation

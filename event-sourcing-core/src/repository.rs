@@ -843,3 +843,39 @@ where
             .map(|()| max_retries + 1)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+    use std::io;
+
+    #[test]
+    fn command_error_display_mentions_aggregate() {
+        let error: CommandError<String, io::Error, io::Error> =
+            CommandError::Aggregate("invalid state".to_string());
+        let msg = error.to_string();
+        assert!(msg.contains("aggregate rejected command"));
+        assert!(error.source().is_none());
+    }
+
+    #[test]
+    fn command_error_store_has_source() {
+        let error: CommandError<String, io::Error, io::Error> =
+            CommandError::Store(io::Error::other("store error"));
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn optimistic_command_error_concurrency_mentions_conflict() {
+        let conflict = ConcurrencyConflict {
+            expected: Some(1u64),
+            actual: Some(2u64),
+        };
+        let error: OptimisticCommandError<String, u64, io::Error, io::Error> =
+            OptimisticCommandError::Concurrency(conflict);
+        let msg = error.to_string();
+        assert!(msg.contains("concurrency conflict"));
+        assert!(error.source().is_none());
+    }
+}

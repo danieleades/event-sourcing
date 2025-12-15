@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use event_sourcing::{
-    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec,
-    Projection, Repository,
+    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
+    store::{InMemoryEventStore, JsonCodec},
 };
 use serde::{Deserialize, Serialize};
 
