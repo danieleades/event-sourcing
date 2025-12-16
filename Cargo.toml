@@ -1,23 +1,25 @@
 [workspace]
 members = [
     ".",
-    "event-sourcing-core",
-    "event-sourcing-macros",
-    "event-sourcing-postgres",
+    "sourcery-core",
+    "sourcery-macros",
+    "sourcery-postgres",
 ]
 
 [workspace.package]
-license = "MIT"
+license = "GPL-3.0-only"
 edition = "2024"
 version = "0.1.0"
 rust-version = "1.88.0"
+homepage = "https://github.com/danieleades/sourcery"
 
 [workspace.lints.clippy]
 pedantic = "warn"
 nursery = "warn"
 
 [package]
-name = "event-sourcing"
+name = "sourcery"
+description = "Event-Sourcing library in pure rust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -28,13 +30,13 @@ workspace = true
 
 [features]
 default = []
-test-util = ["event-sourcing-core/test-util"]
-postgres = ["dep:event-sourcing-postgres"]
+test-util = ["sourcery-core/test-util"]
+postgres = ["dep:sourcery-postgres"]
 
 [dependencies]
-event-sourcing-core = { path = "event-sourcing-core" }
-event-sourcing-macros = { path = "event-sourcing-macros" }
-event-sourcing-postgres = { path = "event-sourcing-postgres", optional = true }
+sourcery-core = { path = "sourcery-core", version = "0.1" }
+sourcery-macros = { path = "sourcery-macros", version = "0.1" }
+sourcery-postgres = { path = "sourcery-postgres", version = "0.1", optional = true }
 
 [dev-dependencies]
 anyhow = { version = "1", default-features = false, features = ["std"] }

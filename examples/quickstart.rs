@@ -1,15 +1,15 @@
-//! A minimal example demonstrating the core concepts of event-sourcing.
+//! A minimal example demonstrating the core concepts of event sourcing.
 //!
 //! Run with: `cargo run --example quickstart`
 
 // NB: the 'ANCHOR's support embedding in mdbook in docs/ directory.
 
 // ANCHOR: full_example
-use event_sourcing::{
+use serde::{Deserialize, Serialize};
+use sourcery::{
     Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
     store::{JsonCodec, inmemory},
 };
-use serde::{Deserialize, Serialize};
 
 // ANCHOR: events
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub struct Deposit {
 // ANCHOR_END: commands
 
 // ANCHOR: aggregate
-#[derive(Debug, Default, Serialize, Deserialize, event_sourcing::Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, sourcery::Aggregate)]
 #[aggregate(id = String, error = String, events(FundsDeposited))]
 pub struct Account {
     balance: i64,

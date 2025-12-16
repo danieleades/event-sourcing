@@ -62,8 +62,9 @@ struct AggregateArgs {
 /// - `From<E>` implementations for each event type
 /// - `Aggregate` trait implementation that dispatches to `Apply<E>` for events
 ///
-/// **Note:** Commands are handled via individual `Handle<C>` trait implementations.
-/// No command enum is generated - use `execute_command::<Aggregate, Command>()` directly.
+/// **Note:** Commands are handled via individual `Handle<C>` trait
+/// implementations. No command enum is generated - use
+/// `execute_command::<Aggregate, Command>()` directly.
 ///
 /// # Attributes
 ///
@@ -73,8 +74,10 @@ struct AggregateArgs {
 /// - `events(Type1, Type2, ...)` - Event types
 ///
 /// ## Optional
-/// - `kind = "name"` - Aggregate type identifier (default: lowercase struct name)
-/// - `event_enum = "Name"` - Override generated event enum name (default: `{Struct}Event`)
+/// - `kind = "name"` - Aggregate type identifier (default: lowercase struct
+///   name)
+/// - `event_enum = "Name"` - Override generated event enum name (default:
+///   `{Struct}Event`)
 ///
 /// # Example
 ///
@@ -138,19 +141,19 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
             #(#variant_names(#event_types)),*
         }
 
-        impl ::event_sourcing::codec::ProjectionEvent for #event_enum_name {
+        impl ::sourcery::codec::ProjectionEvent for #event_enum_name {
             const EVENT_KINDS: &'static [&'static str] = &[#(#event_types::KIND),*];
 
-            fn from_stored<C: ::event_sourcing::codec::Codec>(
+            fn from_stored<C: ::sourcery::codec::Codec>(
                 kind: &str,
                 data: &[u8],
                 codec: &C,
-            ) -> Result<Self, ::event_sourcing::codec::EventDecodeError<C::Error>> {
+            ) -> Result<Self, ::sourcery::codec::EventDecodeError<C::Error>> {
                 match kind {
                     #(#event_types::KIND => Ok(Self::#variant_names(
-                        codec.deserialize(data).map_err(::event_sourcing::codec::EventDecodeError::Codec)?
+                        codec.deserialize(data).map_err(::sourcery::codec::EventDecodeError::Codec)?
                     )),)*
-                    _ => Err(::event_sourcing::codec::EventDecodeError::UnknownKind {
+                    _ => Err(::sourcery::codec::EventDecodeError::UnknownKind {
                         kind: kind.to_string(),
                         expected: Self::EVENT_KINDS,
                     }),
@@ -158,16 +161,16 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
             }
         }
 
-        impl ::event_sourcing::codec::SerializableEvent for #event_enum_name {
-            fn to_persistable<C: ::event_sourcing::codec::Codec, M>(
+        impl ::sourcery::codec::SerializableEvent for #event_enum_name {
+            fn to_persistable<C: ::sourcery::codec::Codec, M>(
                 self,
                 codec: &C,
                 metadata: M,
-            ) -> Result<::event_sourcing::store::PersistableEvent<M>, C::Error> {
+            ) -> Result<::sourcery::store::PersistableEvent<M>, C::Error> {
                 let (kind, data) = match self {
                     #(Self::#variant_names(event) => (#event_types::KIND.to_string(), codec.serialize(&event)?)),*
                 };
-                Ok(::event_sourcing::store::PersistableEvent { kind, data, metadata })
+                Ok(::sourcery::store::PersistableEvent { kind, data, metadata })
             }
         }
 
@@ -179,7 +182,7 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
             }
         )*
 
-        impl ::event_sourcing::Aggregate for #struct_name {
+        impl ::sourcery::Aggregate for #struct_name {
             const KIND: &'static str = #kind;
             type Event = #event_enum_name;
             type Error = #error_type;
@@ -187,7 +190,7 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
 
             fn apply(&mut self, event: &Self::Event) {
                 match event {
-                    #(#event_enum_name::#variant_names(e) => ::event_sourcing::Apply::apply(self, e)),*
+                    #(#event_enum_name::#variant_names(e) => ::sourcery::Apply::apply(self, e)),*
                 }
             }
         }
@@ -198,8 +201,9 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn to_kebab_case_converts_pascal_and_camel() {
@@ -234,7 +238,7 @@ mod tests {
         let compact: String = expanded.chars().filter(|c| !c.is_whitespace()).collect();
 
         assert!(compact.contains("enumAccountEvent"));
-        assert!(compact.contains("impl::event_sourcing::AggregateforAccount"));
+        assert!(compact.contains("impl::sourcery::AggregateforAccount"));
         assert!(compact.contains("constKIND:&'staticstr=\"account\""));
     }
 

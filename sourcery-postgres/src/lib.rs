@@ -1,17 +1,19 @@
 //! Postgres-backed event store implementation.
 //!
 //! This crate provides [`PostgresEventStore`], an implementation of
-//! [`event_sourcing_core::store::EventStore`] for `PostgreSQL`.
+//! [`sourcery_core::store::EventStore`] for `PostgreSQL`.
 
 use std::marker::PhantomData;
 
-use event_sourcing_core::codec::Codec;
-use event_sourcing_core::concurrency::{ConcurrencyConflict, ConcurrencyStrategy};
-use event_sourcing_core::store::{
-    AppendError, EventFilter, EventStore, LoadEventsResult, PersistableEvent, StoredEvent,
-    Transaction,
-};
 use serde::{Serialize, de::DeserializeOwned};
+use sourcery_core::{
+    codec::Codec,
+    concurrency::{ConcurrencyConflict, ConcurrencyStrategy},
+    store::{
+        AppendError, EventFilter, EventStore, LoadEventsResult, PersistableEvent, StoredEvent,
+        Transaction,
+    },
+};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 
 #[derive(Debug, thiserror::Error)]
@@ -52,7 +54,8 @@ where
 
     /// Apply the initial schema (idempotent).
     ///
-    /// This uses `CREATE TABLE IF NOT EXISTS` style DDL so it can be run on startup.
+    /// This uses `CREATE TABLE IF NOT EXISTS` style DDL so it can be run on
+    /// startup.
     ///
     /// # Errors
     ///
@@ -110,11 +113,11 @@ where
     C: Codec + Clone + Send + Sync + 'static,
     M: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    type Id = uuid::Uuid;
-    type Position = i64;
-    type Error = Error;
     type Codec = C;
+    type Error = Error;
+    type Id = uuid::Uuid;
     type Metadata = M;
+    type Position = i64;
 
     fn codec(&self) -> &Self::Codec {
         &self.codec
@@ -274,7 +277,11 @@ where
                 qb.push(" UNION ALL ");
             }
 
-            qb.push("SELECT aggregate_kind, aggregate_id, event_kind, position, data, metadata FROM es_events WHERE event_kind = ").push_bind(&filter.event_kind);
+            qb.push(
+                "SELECT aggregate_kind, aggregate_id, event_kind, position, data, metadata FROM \
+                 es_events WHERE event_kind = ",
+            )
+            .push_bind(&filter.event_kind);
 
             if let Some(kind) = &filter.aggregate_kind {
                 qb.push(" AND aggregate_kind = ").push_bind(kind);

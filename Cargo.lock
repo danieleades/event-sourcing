@@ -303,57 +303,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "event-sourcing"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "event-sourcing-core",
- "event-sourcing-macros",
- "event-sourcing-postgres",
- "serde",
- "serde-evolve",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "event-sourcing-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde-evolve",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "event-sourcing-macros"
-version = "0.1.0"
-dependencies = [
- "darling 0.23.0",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "event-sourcing-postgres"
-version = "0.1.0"
-dependencies = [
- "event-sourcing-core",
- "serde",
- "sqlx",
- "thiserror",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1206,6 +1155,57 @@ checksum = "17129e116933cf371d018bb80ae557e889637989d8638274fb25622827b03881"
 dependencies = [
  "libc",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "sourcery"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde-evolve",
+ "serde_json",
+ "sourcery-core",
+ "sourcery-macros",
+ "sourcery-postgres",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sourcery-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde-evolve",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sourcery-macros"
+version = "0.1.0"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "sourcery-postgres"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sourcery-core",
+ "sqlx",
+ "thiserror",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

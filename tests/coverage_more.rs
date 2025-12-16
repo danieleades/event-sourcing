@@ -1,20 +1,22 @@
 #![cfg(feature = "test-util")]
 
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
-use event_sourcing::concurrency::ConcurrencyConflict;
-use event_sourcing::projection::ProjectionError;
-use event_sourcing::repository::{OptimisticCommandError, SnapshotCommandError};
-use event_sourcing::snapshot::{
-    InMemorySnapshotStore, OfferSnapshotError, Snapshot, SnapshotOffer, SnapshotStore,
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    sync::atomic::{AtomicBool, Ordering},
 };
-use event_sourcing::store::{EventStore, JsonCodec, PersistableEvent, inmemory};
-use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
+
 use serde::{Deserialize, Serialize};
+use sourcery::{
+    Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository,
+    codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent},
+    concurrency::ConcurrencyConflict,
+    projection::ProjectionError,
+    repository::{OptimisticCommandError, SnapshotCommandError},
+    snapshot::{InMemorySnapshotStore, OfferSnapshotError, Snapshot, SnapshotOffer, SnapshotStore},
+    store::{EventStore, JsonCodec, PersistableEvent, inmemory},
+    test::RepositoryTestExt,
+};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,10 +75,11 @@ struct Counter {
 }
 
 impl Aggregate for Counter {
-    const KIND: &'static str = "counter";
-    type Event = CounterEvent;
     type Error = String;
+    type Event = CounterEvent;
     type Id = String;
+
+    const KIND: &'static str = "counter";
 
     fn apply(&mut self, event: &Self::Event) {
         match event {
@@ -357,9 +360,9 @@ struct SnapshotLoadError;
 struct FailingLoadSnapshotStore;
 
 impl SnapshotStore for FailingLoadSnapshotStore {
+    type Error = SnapshotLoadError;
     type Id = String;
     type Position = u64;
-    type Error = SnapshotLoadError;
 
     fn load<'a>(
         &'a self,
@@ -410,9 +413,9 @@ async fn snapshot_load_failure_falls_back_to_full_replay() {
 struct CorruptSnapshotStore;
 
 impl SnapshotStore for CorruptSnapshotStore {
+    type Error = SnapshotLoadError;
     type Id = String;
     type Position = u64;
-    type Error = SnapshotLoadError;
 
     fn load<'a>(
         &'a self,
@@ -504,9 +507,9 @@ impl TrackingSnapshotStore {
 }
 
 impl SnapshotStore for TrackingSnapshotStore {
+    type Error = Infallible;
     type Id = String;
     type Position = u64;
-    type Error = Infallible;
 
     fn load<'a>(
         &'a self,

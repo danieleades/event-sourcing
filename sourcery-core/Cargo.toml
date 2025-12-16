@@ -1,9 +1,10 @@
 [package]
-name = "event-sourcing-core"
+name = "sourcery-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+homepage.workspace = true
 
 [lints]
 workspace = true
@@ -22,4 +23,3 @@ tracing = { version = "0.1", default-features = false, features = ["attributes",
 anyhow = { version = "1", default-features = false, features = ["std"] }
 serde-evolve = "0.1.0"
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
-

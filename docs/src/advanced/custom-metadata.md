@@ -24,7 +24,7 @@ pub struct EventMetadata {
 Configure your store with the metadata type:
 
 ```rust,ignore
-use event_sourcing::store::{inmemory, JsonCodec};
+use sourcery::store::{inmemory, JsonCodec};
 
 let store: inmemory::Store<String, JsonCodec, EventMetadata> =
     inmemory::Store::new(JsonCodec);

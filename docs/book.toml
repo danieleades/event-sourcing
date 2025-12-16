@@ -1,5 +1,5 @@
 [book]
-title = "Event Sourcing in Rust"
+title = "Sourcery"
 authors = ["Daniel Eades"]
 language = "en"
 src = "src"
@@ -8,8 +8,8 @@ src = "src"
 build-dir = "book"
 
 [output.html]
-git-repository-url = "https://github.com/danieleades/event-sourcing"
-edit-url-template = "https://github.com/danieleades/event-sourcing/edit/main/docs/{path}"
+git-repository-url = "https://github.com/danieleades/sourcery"
+edit-url-template = "https://github.com/danieleades/sourcery/edit/main/docs/{path}"
 
 [output.html.playground]
 editable = true

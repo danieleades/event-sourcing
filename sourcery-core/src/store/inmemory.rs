@@ -60,11 +60,12 @@ where
     C: Codec + Clone + Send + Sync + 'static,
     M: Clone + Send + Sync + 'static,
 {
-    type Id = Id;
-    type Position = u64; // Global sequence for chronological ordering
-    type Error = InMemoryError;
     type Codec = C;
+    // Global sequence for chronological ordering
+    type Error = InMemoryError;
+    type Id = Id;
     type Metadata = M;
+    type Position = u64;
 
     fn codec(&self) -> &Self::Codec {
         &self.codec
@@ -221,8 +222,8 @@ where
         let mut result = Vec::new();
         let mut seen: HashSet<(StreamKey<Id>, String)> = HashSet::new(); // (stream key, event kind)
 
-        // Group filters by aggregate ID, tracking each filter's individual position constraint
-        // Maps event_kind -> after_position for that specific filter
+        // Group filters by aggregate ID, tracking each filter's individual position
+        // constraint Maps event_kind -> after_position for that specific filter
         let mut all_kinds: HashMap<String, Option<u64>> = HashMap::new(); // Filters with no aggregate restriction
         let mut by_aggregate: HashMap<StreamKey<Id>, HashMap<String, Option<u64>>> = HashMap::new(); // Filters targeting a specific aggregate
 

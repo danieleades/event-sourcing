@@ -9,7 +9,7 @@ the stream version hasn't changed between loading the aggregate and committing n
 By default, repositories use **optimistic concurrency**—version checking is performed on every write. This is the safe default for production systems.
 
 ```rust,ignore
-use event_sourcing::{Repository, store::{inmemory, JsonCodec}};
+use sourcery::{Repository, store::{inmemory, JsonCodec}};
 
 let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
 let mut repo = Repository::new(store); // Optimistic concurrency enabled
@@ -42,7 +42,7 @@ When using optimistic concurrency, `execute_command` returns
 loading and committing:
 
 ```rust,ignore
-use event_sourcing::OptimisticCommandError;
+use sourcery::OptimisticCommandError;
 
 match repo
     .execute_command::<MyAggregate, MyCommand>(&id, &command, &metadata)
@@ -67,7 +67,7 @@ The most common pattern for handling conflicts is to **retry** the operation.
 The repository provides a helper for this: `execute_with_retry`.
 
 ```rust,ignore
-use event_sourcing::RetryResult;
+use sourcery::RetryResult;
 
 let attempts: RetryResult<MyAggregate, MyStore> =
     repo.execute_with_retry::<MyAggregate, MyCommand>(&id, &command, &metadata, 3).await?;
@@ -105,7 +105,7 @@ The `inmemory::Store` supports this via its `stream_version()` method and the `e
 
 ## Example
 
-See [`examples/optimistic_concurrency.rs`](https://github.com/danieleades/event-sourcing/blob/main/examples/optimistic_concurrency.rs)
+See [`examples/optimistic_concurrency.rs`](https://github.com/danieleades/sourcery/blob/main/examples/optimistic_concurrency.rs)
 for a complete working example demonstrating:
 
 - Basic optimistic concurrency usage

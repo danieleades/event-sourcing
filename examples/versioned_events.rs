@@ -6,8 +6,10 @@
 //! This example shows:
 //! - **Versioned domain events**: Events that evolve through multiple versions
 //! - **Versioned metadata**: Infrastructure metadata that changes over time
-//! - **Transparent migration**: Old events automatically migrate to current schema
-//! - **Event replay**: Historical events from different versions replaying correctly
+//! - **Transparent migration**: Old events automatically migrate to current
+//!   schema
+//! - **Event replay**: Historical events from different versions replaying
+//!   correctly
 //!
 //! Real-world scenario: An order management system where:
 //! - V1: Basic orders (product + quantity)
@@ -16,12 +18,13 @@
 //!
 //! Run with: `cargo run --example versioned_events`
 
-use event_sourcing::codec::ProjectionEvent;
-use event_sourcing::store::EventStore;
-use event_sourcing::store::{EventFilter, JsonCodec, inmemory};
-use event_sourcing::{Aggregate, Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
 use serde_evolve::Versioned;
+use sourcery::{
+    Aggregate, Apply, DomainEvent, Handle, Repository,
+    codec::ProjectionEvent,
+    store::{EventFilter, EventStore, JsonCodec, inmemory},
+};
 
 // =============================================================================
 // Versioned Domain Event - OrderPlaced
@@ -49,8 +52,9 @@ pub struct OrderPlaced {
 /// This module contains the wire format DTOs for each version. The versioned
 /// crate automatically migrates from V1 → V2 → V3 → `OrderPlaced`.
 mod order_placed_versions {
-    use super::OrderPlaced;
     use serde::{Deserialize, Serialize};
+
+    use super::OrderPlaced;
 
     /// V1: Original event schema - just product and quantity
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -151,8 +155,9 @@ pub struct OrderMetadata {
 }
 
 mod metadata_versions {
-    use super::OrderMetadata;
     use serde::{Deserialize, Serialize};
+
+    use super::OrderMetadata;
 
     /// V1: Basic metadata
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -351,7 +356,7 @@ impl Handle<CancelOrder> for Order {
 #[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Versioned Events with Event Sourcing ===\n");
+    println!("=== Versioned Events with Sourcery ===\n");
 
     // Use OrderMetadata (versioned) as the metadata type for the store
     let store: inmemory::Store<String, JsonCodec, OrderMetadata> = inmemory::Store::new(JsonCodec);

@@ -11,7 +11,7 @@ While `#[derive(Aggregate)]` handles most cases, you might implement the traits 
 ### With Derive Macro
 
 ```rust,ignore
-use event_sourcing::{Aggregate, Apply, DomainEvent, Handle};
+use sourcery::{Aggregate, Apply, DomainEvent, Handle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,9 +46,9 @@ impl Apply<FundsWithdrawn> for Account {
 ### Without Derive Macro
 
 ```rust,ignore
-use event_sourcing::{Aggregate, DomainEvent};
-use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
-use event_sourcing::store::PersistableEvent;
+use sourcery::{Aggregate, DomainEvent};
+use sourcery::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
+use sourcery::store::PersistableEvent;
 use serde::{Deserialize, Serialize};
 
 // Events (same as before)

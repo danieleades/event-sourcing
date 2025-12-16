@@ -1,6 +1,6 @@
 # Introduction
 
-**event-sourcing** provides building blocks for pragmatic event-sourced systems in Rust. It keeps your domain types pure while giving you tools to rebuild state, project read models, and persist events through a pluggable store interface.
+**sourcery** provides building blocks for pragmatic event-sourced systems in Rust. It keeps your domain types pure while giving you tools to rebuild state, project read models, and persist events through a pluggable store interface.
 
 ## When to Use Event Sourcing
 

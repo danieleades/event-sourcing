@@ -12,7 +12,7 @@ App: "Your Application" {
   Projection Definition
 }
 
-Crate: "event-sourcing crate" {
+Crate: "sourcery crate" {
   Repository
   EventStore {shape: cylinder}
   SnapshotStore {shape: cylinder}

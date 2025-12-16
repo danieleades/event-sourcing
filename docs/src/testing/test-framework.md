@@ -15,13 +15,13 @@ Add the `test-util` feature to your dev dependencies:
 
 ```toml
 [dev-dependencies]
-event-sourcing = { version = "0.1", features = ["test-util"] }
+sourcery = { version = "0.1", features = ["test-util"] }
 ```
 
 ## Basic Usage
 
 ```rust,ignore
-use event_sourcing::test::TestFramework;
+use sourcery::test::TestFramework;
 
 type AccountTest = TestFramework<Account>;
 
@@ -148,7 +148,7 @@ Custom assertions on the result:
 ## Complete Test Suite Example
 
 ```rust,ignore
-use event_sourcing::test::TestFramework;
+use sourcery::test::TestFramework;
 
 type AccountTest = TestFramework<Account>;
 

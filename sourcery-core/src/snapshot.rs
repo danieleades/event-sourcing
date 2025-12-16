@@ -1,16 +1,17 @@
 //! Snapshot support for optimized aggregate loading.
 //!
 //! Snapshots persist aggregate state at a point in time, reducing the number of
-//! events that need to be replayed when loading an aggregate. This module provides:
+//! events that need to be replayed when loading an aggregate. This module
+//! provides:
 //!
 //! - [`Snapshot`] - Point-in-time aggregate state
 //! - [`SnapshotStore`] - Trait for snapshot persistence with policy
-//! - [`NoSnapshots`] - No-op implementation (use `Repository` instead if you want no snapshots)
-//! - [`InMemorySnapshotStore`] - Reference implementation with configurable policy
+//! - [`NoSnapshots`] - No-op implementation (use `Repository` instead if you
+//!   want no snapshots)
+//! - [`InMemorySnapshotStore`] - Reference implementation with configurable
+//!   policy
 
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::future::Future;
+use std::{collections::HashMap, convert::Infallible, future::Future};
 
 use crate::store::StreamKey;
 
@@ -20,12 +21,13 @@ use crate::store::StreamKey;
 /// was taken. When loading an aggregate, only events after this position need
 /// to be replayed.
 ///
-/// Schema evolution is handled at the serialization layer (e.g., via `serde_evolve`),
-/// so no version field is needed here.
+/// Schema evolution is handled at the serialization layer (e.g., via
+/// `serde_evolve`), so no version field is needed here.
 ///
 /// # Type Parameters
 ///
-/// - `Pos`: The position type used by the event store (e.g., `u64`, `i64`, etc.)
+/// - `Pos`: The position type used by the event store (e.g., `u64`, `i64`,
+///   etc.)
 #[derive(Clone, Debug)]
 pub struct Snapshot<Pos> {
     /// Event position when this snapshot was taken.
@@ -36,9 +38,10 @@ pub struct Snapshot<Pos> {
 
 /// Trait for snapshot persistence with built-in policy.
 ///
-/// Implementations decide both *how* to store snapshots and *when* to store them.
-/// The repository calls [`offer_snapshot`](SnapshotStore::offer_snapshot) after each successful
-/// command execution to decide whether to create and persist a new snapshot.
+/// Implementations decide both *how* to store snapshots and *when* to store
+/// them. The repository calls [`offer_snapshot`](SnapshotStore::offer_snapshot)
+/// after each successful command execution to decide whether to create and
+/// persist a new snapshot.
 ///
 /// # Example Implementations
 ///
@@ -75,13 +78,15 @@ pub trait SnapshotStore: Send + Sync {
 
     /// Whether to store a snapshot, with lazy snapshot creation.
     ///
-    /// The repository calls this after successfully appending new events, passing
-    /// `events_since_last_snapshot` and a `create_snapshot` callback. Implementations
-    /// may decline without invoking `create_snapshot`, avoiding unnecessary snapshot
-    /// creation cost (serialization, extra I/O, etc.).
+    /// The repository calls this after successfully appending new events,
+    /// passing `events_since_last_snapshot` and a `create_snapshot`
+    /// callback. Implementations may decline without invoking
+    /// `create_snapshot`, avoiding unnecessary snapshot creation cost
+    /// (serialization, extra I/O, etc.).
     ///
-    /// Returning [`SnapshotOffer::Stored`] indicates that the snapshot was persisted.
-    /// Returning [`SnapshotOffer::Declined`] indicates that no snapshot was stored.
+    /// Returning [`SnapshotOffer::Stored`] indicates that the snapshot was
+    /// persisted. Returning [`SnapshotOffer::Declined`] indicates that no
+    /// snapshot was stored.
     ///
     /// # Errors
     ///
@@ -149,9 +154,9 @@ where
     Id: Send + Sync + 'static,
     Pos: Send + Sync + 'static,
 {
+    type Error = Infallible;
     type Id = Id;
     type Position = Pos;
-    type Error = Infallible;
 
     fn load<'a>(
         &'a self,
@@ -240,7 +245,7 @@ impl SnapshotPolicy {
 /// # Example
 ///
 /// ```ignore
-/// use event_sourcing::{Repository, InMemoryEventStore, InMemorySnapshotStore, JsonCodec};
+/// use sourcery::{Repository, InMemoryEventStore, InMemorySnapshotStore, JsonCodec};
 ///
 /// let repo = Repository::new(InMemoryEventStore::new(JsonCodec))
 ///     .with_snapshots(InMemorySnapshotStore::every(100));
@@ -280,7 +285,8 @@ impl<Id, Pos> InMemorySnapshotStore<Id, Pos> {
     /// Create a snapshot store that never saves (load-only).
     ///
     /// Use for read replicas, short-lived aggregates, or when managing
-    /// snapshots externally. See the policy guidelines above for when this fits.
+    /// snapshots externally. See the policy guidelines above for when this
+    /// fits.
     #[must_use]
     pub fn never() -> Self {
         Self {
@@ -301,9 +307,9 @@ where
     Id: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
     Pos: Clone + Send + Sync + 'static,
 {
+    type Error = Infallible;
     type Id = Id;
     type Position = Pos;
-    type Error = Infallible;
 
     #[tracing::instrument(skip(self, aggregate_id))]
     fn load<'a>(

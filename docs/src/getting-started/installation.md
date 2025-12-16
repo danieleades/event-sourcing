@@ -1,14 +1,14 @@
 # Installation
 
-Add `event-sourcing` to your `Cargo.toml`:
+Add `sourcery` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-event-sourcing = "0.1"
+sourcery = "0.1"
 serde = { version = "1", features = ["derive"] }
 ```
 
-The crate re-exports the derive macro, so you don't need a separate dependency for `event-sourcing-macros`.
+The crate re-exports the derive macro, so you don't need a separate dependency for `sourcery-macros`.
 
 ## Feature Flags
 
@@ -21,14 +21,14 @@ To enable test utilities:
 
 ```toml
 [dev-dependencies]
-event-sourcing = { version = "0.1", features = ["test-util"] }
+sourcery = { version = "0.1", features = ["test-util"] }
 ```
 
 To use the PostgreSQL store:
 
 ```toml
 [dependencies]
-event-sourcing = { version = "0.1", features = ["postgres"] }
+sourcery = { version = "0.1", features = ["postgres"] }
 ```
 
 ## Minimum Rust Version

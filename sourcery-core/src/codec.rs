@@ -51,9 +51,9 @@ pub trait Codec {
 ///
 /// Implemented by aggregate event enums to serialize variants for persistence.
 ///
-/// The `Aggregate` derive macro generates this automatically; hand-written enums can
-/// implement it directly if preferred. The generic `M` parameter allows passing through
-/// custom metadata types supplied by the store.
+/// The `Aggregate` derive macro generates this automatically; hand-written
+/// enums can implement it directly if preferred. The generic `M` parameter
+/// allows passing through custom metadata types supplied by the store.
 pub trait SerializableEvent {
     /// Serialize this event to persistable form with generic metadata.
     ///
@@ -67,13 +67,14 @@ pub trait SerializableEvent {
     ) -> Result<crate::store::PersistableEvent<M>, C::Error>;
 }
 
-/// Trait for event sum types that can deserialize themselves from stored events.
+/// Trait for event sum types that can deserialize themselves from stored
+/// events.
 ///
 /// Implemented by event enums to deserialize stored events.
 ///
-/// Deriving [`Aggregate`](crate::Aggregate) includes a `ProjectionEvent` implementation for
-/// the generated sum type. Custom enums can opt in manually using the pattern illustrated
-/// below.
+/// Deriving [`Aggregate`](crate::Aggregate) includes a `ProjectionEvent`
+/// implementation for the generated sum type. Custom enums can opt in manually
+/// using the pattern illustrated below.
 pub trait ProjectionEvent: Sized {
     /// The list of event kinds this sum type can deserialize.
     ///
@@ -84,8 +85,8 @@ pub trait ProjectionEvent: Sized {
     ///
     /// # Errors
     ///
-    /// Returns [`EventDecodeError::UnknownKind`] if the event kind is not recognized,
-    /// or [`EventDecodeError::Codec`] if deserialization fails.
+    /// Returns [`EventDecodeError::UnknownKind`] if the event kind is not
+    /// recognized, or [`EventDecodeError::Codec`] if deserialization fails.
     fn from_stored<C: Codec>(
         kind: &str,
         data: &[u8],

@@ -10,5 +10,13 @@ allow = [
 ]
 confidence-threshold = 1.0
 
+# This workspace is allowed to be GPL-3.0, but none of it's dependencies are!
+exceptions = [
+    { allow = ["GPL-3.0-only"], crate = "sourcery" },
+    { allow = ["GPL-3.0-only"], crate = "sourcery-postgres" },
+    { allow = ["GPL-3.0-only"], crate = "sourcery-core" },
+    { allow = ["GPL-3.0-only"], crate = "sourcery-macros" },
+]
+
 [graph]
 all-features = true

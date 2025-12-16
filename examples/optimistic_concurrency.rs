@@ -6,11 +6,13 @@
 //!
 //! Run with: `cargo run --example optimistic_concurrency`
 
-use event_sourcing::repository::OptimisticCommandError;
-use event_sourcing::store::{JsonCodec, inmemory};
-use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
+use sourcery::{
+    Apply, DomainEvent, Handle, Repository,
+    repository::OptimisticCommandError,
+    store::{JsonCodec, inmemory},
+    test::RepositoryTestExt,
+};
 
 // =============================================================================
 // Domain Events
@@ -52,7 +54,7 @@ pub struct RestockItem {
 // Aggregate
 // =============================================================================
 
-#[derive(Debug, Default, Serialize, Deserialize, event_sourcing::Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, sourcery::Aggregate)]
 #[aggregate(id = String, error = InventoryError, events(ItemReserved, ItemRestocked))]
 pub struct InventoryItem {
     available: u32,
@@ -112,7 +114,8 @@ type OptimisticRepo = Repository<inmemory::Store<String, JsonCodec, ()>>;
 
 /// Part 1: Basic optimistic concurrency usage.
 ///
-/// Demonstrates initializing inventory and making reservations without conflicts.
+/// Demonstrates initializing inventory and making reservations without
+/// conflicts.
 async fn part1_basic_usage() -> Result<(OptimisticRepo, String), Box<dyn std::error::Error>> {
     println!("PART 1: Basic optimistic concurrency usage\n");
 
@@ -150,7 +153,8 @@ async fn part1_basic_usage() -> Result<(OptimisticRepo, String), Box<dyn std::er
 
 /// Part 2: Conflict detection.
 ///
-/// Demonstrates how concurrent modifications are detected when loading fresh state.
+/// Demonstrates how concurrent modifications are detected when loading fresh
+/// state.
 async fn part2_conflict_detection(
     repo: &mut OptimisticRepo,
     item_id: &String,
@@ -169,8 +173,9 @@ async fn part2_conflict_detection(
         item.available
     );
 
-    // Now try to reserve - this will succeed because execute_command loads fresh state
-    // The conflict would only occur if we had pre-loaded state before the concurrent modification
+    // Now try to reserve - this will succeed because execute_command loads fresh
+    // state The conflict would only occur if we had pre-loaded state before the
+    // concurrent modification
     println!("4. Reserving 10 more units (loads fresh state, so no conflict)...");
     repo.execute_command::<InventoryItem, ReserveItem>(item_id, &ReserveItem { quantity: 10 }, &())
         .await?;
@@ -183,7 +188,8 @@ async fn part2_conflict_detection(
 
 /// Part 3: Retry pattern for handling conflicts.
 ///
-/// Demonstrates the built-in `execute_with_retry` method for automatic conflict handling.
+/// Demonstrates the built-in `execute_with_retry` method for automatic conflict
+/// handling.
 async fn part3_retry_pattern() -> Result<(OptimisticRepo, String), Box<dyn std::error::Error>> {
     println!("PART 3: Retry pattern for handling conflicts\n");
 

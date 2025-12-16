@@ -4,19 +4,21 @@
 //! long-lived aggregates with many events.
 //!
 //! This example shows:
-//! - **Snapshot configuration**: Using `InMemorySnapshotStore` with different policies
+//! - **Snapshot configuration**: Using `InMemorySnapshotStore` with different
+//!   policies
 //! - **Automatic snapshotting**: Snapshots created after N events
-//! - **Snapshot-based loading**: Aggregate restored from snapshot + delta events
+//! - **Snapshot-based loading**: Aggregate restored from snapshot + delta
+//!   events
 //! - **Policy comparison**: Comparing always, every-N, and never policies
 //!
 //! Run with: `cargo run --example snapshotting`
 
-use event_sourcing::{
+use serde::{Deserialize, Serialize};
+use sourcery::{
     Aggregate, Apply, DomainEvent, Handle, Repository,
     snapshot::InMemorySnapshotStore,
     store::{JsonCodec, inmemory},
 };
-use serde::{Deserialize, Serialize};
 
 // =============================================================================
 // Domain Events
