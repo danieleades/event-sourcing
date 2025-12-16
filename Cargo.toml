@@ -19,6 +19,7 @@ nursery = "warn"
 
 [package]
 name = "sourcery"
+description = "Event-Sourcing library in pure rust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
