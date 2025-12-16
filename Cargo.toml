@@ -32,9 +32,9 @@ test-util = ["sourcery-core/test-util"]
 postgres = ["dep:sourcery-postgres"]
 
 [dependencies]
-sourcery-core = { path = "sourcery-core" }
-sourcery-macros = { path = "sourcery-macros" }
-sourcery-postgres = { path = "sourcery-postgres", optional = true }
+sourcery-core = { path = "sourcery-core", version = "0.1" }
+sourcery-macros = { path = "sourcery-macros", version = "0.1" }
+sourcery-postgres = { path = "sourcery-postgres", version = "0.1", optional = true }
 
 [dev-dependencies]
 anyhow = { version = "1", default-features = false, features = ["std"] }

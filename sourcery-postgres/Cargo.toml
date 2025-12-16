@@ -9,7 +9,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-sourcery-core = { path = "../sourcery-core" }
+sourcery-core = { path = "../sourcery-core", version = "0.1"}
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 sqlx = { version = "0.8.3", default-features = false, features = ["json", "postgres", "runtime-tokio-rustls", "uuid"] }
 thiserror = { version = "2", default-features = false, features = ["std"] }
