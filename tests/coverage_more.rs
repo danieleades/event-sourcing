@@ -11,9 +11,7 @@ use event_sourcing::repository::{OptimisticCommandError, SnapshotCommandError};
 use event_sourcing::snapshot::{
     InMemorySnapshotStore, OfferSnapshotError, Snapshot, SnapshotOffer, SnapshotStore,
 };
-use event_sourcing::store::{
-    EventStore, JsonCodec, PersistableEvent, inmemory,
-};
+use event_sourcing::store::{EventStore, JsonCodec, PersistableEvent, inmemory};
 use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
 use serde::{Deserialize, Serialize};

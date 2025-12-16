@@ -442,8 +442,7 @@ impl ApplyProjection<InvoiceSettled> for CustomerBillingProjection {
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: inmemory::Store<String, JsonCodec, EventMetadata> =
-        inmemory::Store::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, EventMetadata> = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let customer_id = String::from("ACME-001");

@@ -21,7 +21,7 @@ pub mod store {
     #[cfg(feature = "postgres")]
     #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
     pub mod postgres {
-        pub use event_sourcing_postgres::{Store, Error};
+        pub use event_sourcing_postgres::{Error, Store};
     }
 
     pub use event_sourcing_core::store::inmemory;

@@ -1,6 +1,12 @@
 use std::{collections::HashMap, convert::Infallible};
 
-use crate::{codec::Codec, concurrency::{ConcurrencyConflict, ConcurrencyStrategy}, store::{AppendError, EventFilter, EventStore, PersistableEvent, StoredEvent, StreamKey, Transaction}};
+use crate::{
+    codec::Codec,
+    concurrency::{ConcurrencyConflict, ConcurrencyStrategy},
+    store::{
+        AppendError, EventFilter, EventStore, PersistableEvent, StoredEvent, StreamKey, Transaction,
+    },
+};
 
 /// In-memory event store that keeps streams in a hash map.
 ///

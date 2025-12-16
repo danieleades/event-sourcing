@@ -354,8 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Versioned Events with Event Sourcing ===\n");
 
     // Use OrderMetadata (versioned) as the metadata type for the store
-    let store: inmemory::Store<String, JsonCodec, OrderMetadata> =
-        inmemory::Store::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, OrderMetadata> = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     // ========================================

@@ -14,7 +14,6 @@ use crate::concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, U
 
 pub mod inmemory;
 
-
 /// Raw event data ready to be written to a store backend.
 ///
 /// This is the boundary between Repository and `EventStore`. Repository serializes
@@ -385,7 +384,6 @@ pub trait EventStore: Send + Sync {
 }
 // ANCHOR_END: event_store_trait
 
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct StreamKey<Id> {
     aggregate_kind: String,
@@ -516,8 +514,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_appends_and_loads_single_event() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let data = br#"{"amount":10}"#;
 
         append_raw_event(&mut store, "counter", "c1", "value-added", data).await;
@@ -535,8 +532,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_loads_multiple_kinds_from_one_stream() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(
             &mut store,
             "counter",
@@ -577,8 +573,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_filters_by_event_kind_and_aggregate_id() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
         append_raw_event(&mut store, "counter", "c2", "value-added", b"{}").await;
 
@@ -591,8 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_orders_events_by_global_position() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
         append_raw_event(&mut store, "counter", "c2", "value-added", b"{}").await;
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
@@ -611,8 +605,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_deduplicates_overlapping_filters() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
         let filters = vec![
@@ -625,8 +618,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_applies_after_position_filter() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 0
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 1
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 2
@@ -652,8 +644,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_version_checking_detects_conflict() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
         let ok = store
@@ -713,8 +704,7 @@ mod tests {
 
     #[tokio::test]
     async fn unchecked_transaction_commit_persists_events() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let mut tx =
             store.begin::<crate::concurrency::Unchecked>("counter", "c1".to_string(), None);
         tx.append(TestEvent::Added(TestAdded { amount: 10 }), ())
@@ -732,8 +722,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_transaction_without_commit_discards_buffered_events() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         {
             let mut tx =
                 store.begin::<crate::concurrency::Unchecked>("counter", "c1".to_string(), None);
@@ -750,8 +739,7 @@ mod tests {
 
     #[tokio::test]
     async fn optimistic_transaction_detects_stale_expected_version() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "added", br#"{"amount":10}"#).await;
 
         let mut tx =
@@ -765,8 +753,7 @@ mod tests {
 
     #[tokio::test]
     async fn optimistic_transaction_detects_non_new_stream_when_expect_new() {
-        let mut store: inmemory::Store<String, JsonCodec, ()> =
-            inmemory::Store::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "added", br#"{"amount":10}"#).await;
 
         let mut tx =

@@ -15,12 +15,20 @@ The crate re-exports the derive macro, so you don't need a separate dependency f
 | Feature | Description |
 |---------|-------------|
 | `test-util` | Enables `TestFramework` for given-when-then aggregate testing |
+| `postgres` | PostgreSQL event store via `sqlx` |
 
 To enable test utilities:
 
 ```toml
 [dev-dependencies]
 event-sourcing = { version = "0.1", features = ["test-util"] }
+```
+
+To use the PostgreSQL store:
+
+```toml
+[dependencies]
+event-sourcing = { version = "0.1", features = ["postgres"] }
 ```
 
 ## Minimum Rust Version
