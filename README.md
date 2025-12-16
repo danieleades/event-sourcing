@@ -9,7 +9,7 @@ persist events through a pluggable store interface.
 - **Domain-first API** – events are plain structs that implement `DomainEvent`; IDs and
   metadata live in an envelope rather than in your payloads.
 - **Aggregate derive** – `#[derive(Aggregate)]` generates the event enum plus
-  serialization/deserialization glue so command handlers stay focused on behaviour.
+  serialisation/deserialisation glue so command handlers stay focused on behaviour.
 - **Repository orchestration** – `Repository` loads aggregates, executes commands via
   `Handle<C>`, and persists the resulting events in a single transaction.
 - **Metadata-aware projections** – projections receive aggregate IDs, events, and metadata

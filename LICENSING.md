@@ -32,6 +32,9 @@ This project is available under two licensing options:
 - Contact: <danieleades@hotmail.com>
 - Include: Brief description of your intended use case
 - Commercial licensing terms are negotiated on a case-by-case basis
+- Commercial licenses are typically free or priced nominally for individuals and small teams
+- For well-funded organisations, we may request a very modest fee to support ongoing maintenance
+- We may ask a few follow-up questions; in rare cases we may decline a commercial licensing request
 
 ## How to Choose
 
@@ -41,6 +44,7 @@ This project is available under two licensing options:
 - You're doing academic research
 - You're comfortable making your code available under GPL v3
 - You're just experimenting or learning
+- You're evaluating Sourcery privately without distributing it
 
 **Contact us for commercial licensing if:**
 
