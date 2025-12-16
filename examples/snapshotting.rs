@@ -14,7 +14,7 @@
 use event_sourcing::{
     Aggregate, Apply, DomainEvent, Handle, Repository,
     snapshot::InMemorySnapshotStore,
-    store::{InMemoryEventStore, JsonCodec},
+    store::{JsonCodec, inmemory},
 };
 use serde::{Deserialize, Serialize};
 
@@ -147,7 +147,7 @@ type ExampleResult = Result<(), Box<dyn std::error::Error>>;
 async fn run_repository_without_snapshots() -> ExampleResult {
     println!("1. Repository without snapshots (default behavior)");
 
-    let event_store = InMemoryEventStore::new(JsonCodec);
+    let event_store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(event_store);
     let customer_id = "CUST-001".to_string();
 
@@ -176,7 +176,7 @@ async fn run_repository_without_snapshots() -> ExampleResult {
 async fn run_always_snapshot_policy() -> ExampleResult {
     println!("2. Repository with always-snapshot policy");
 
-    let event_store = InMemoryEventStore::new(JsonCodec);
+    let event_store = inmemory::Store::new(JsonCodec);
     let snapshot_store = InMemorySnapshotStore::always();
     let mut repo = Repository::new(event_store).with_snapshots(snapshot_store);
     let customer_id = "CUST-002".to_string();
@@ -207,7 +207,7 @@ async fn run_always_snapshot_policy() -> ExampleResult {
 async fn run_every_n_snapshot_policy() -> ExampleResult {
     println!("3. Repository with every-5-events policy");
 
-    let event_store = InMemoryEventStore::new(JsonCodec);
+    let event_store = inmemory::Store::new(JsonCodec);
     let snapshot_store = InMemorySnapshotStore::every(5);
     let mut repo = Repository::new(event_store).with_snapshots(snapshot_store);
     let customer_id = "CUST-003".to_string();
@@ -241,7 +241,7 @@ async fn run_every_n_snapshot_policy() -> ExampleResult {
 async fn run_snapshot_restoration() -> ExampleResult {
     println!("4. Snapshot restoration after more activity");
 
-    let event_store = InMemoryEventStore::new(JsonCodec);
+    let event_store = inmemory::Store::new(JsonCodec);
     let snapshot_store = InMemorySnapshotStore::every(3);
     let mut repo = Repository::new(event_store).with_snapshots(snapshot_store);
     let customer_id = "CUST-004".to_string();
@@ -283,7 +283,7 @@ async fn run_snapshot_restoration() -> ExampleResult {
 async fn run_never_snapshot_policy() -> ExampleResult {
     println!("5. Never-snapshot policy (load-only mode)");
 
-    let event_store = InMemoryEventStore::new(JsonCodec);
+    let event_store = inmemory::Store::new(JsonCodec);
     let snapshot_store = InMemorySnapshotStore::never();
     let mut repo = Repository::new(event_store).with_snapshots(snapshot_store);
     let customer_id = "CUST-005".to_string();

@@ -659,7 +659,7 @@ mod repository_test_ext_tests {
     use crate::{
         codec::{EventDecodeError, ProjectionEvent},
         event::DomainEvent,
-        store::{InMemoryEventStore, JsonCodec, PersistableEvent},
+        store::{inmemory, JsonCodec, PersistableEvent},
     };
 
     // Test fixtures with SerializableEvent implementation
@@ -739,7 +739,7 @@ mod repository_test_ext_tests {
 
     #[tokio::test]
     async fn seed_events_appends_typed_events() {
-        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let mut repo = Repository::new(store);
         let id = "s1".to_string();
 
@@ -765,8 +765,8 @@ mod repository_test_ext_tests {
 
     #[tokio::test]
     async fn inject_concurrent_event_appends_single_event() {
-        let event_store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let event_store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         let mut repo = Repository::new(event_store);
         let id = "s1".to_string();
 
@@ -792,8 +792,8 @@ mod repository_test_ext_tests {
 
     #[tokio::test]
     async fn inject_raw_event_appends_raw_bytes() {
-        let event_store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let event_store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         let mut repo = Repository::new(event_store);
 
         // Inject raw event with pre-serialized data

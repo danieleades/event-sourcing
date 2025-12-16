@@ -13,10 +13,9 @@ use event_sourcing_core::store::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum PostgresStoreError {
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("invalid position value from database: {0}")]
@@ -31,13 +30,13 @@ pub enum PostgresStoreError {
 /// - Positions are global and monotonic (`i64`, backed by `BIGSERIAL`).
 /// - Metadata is stored as `jsonb` (`M: Serialize + DeserializeOwned`).
 #[derive(Clone)]
-pub struct PostgresEventStore<C, M> {
+pub struct Store<C, M> {
     pool: PgPool,
     codec: C,
     _phantom: PhantomData<M>,
 }
 
-impl<C, M> PostgresEventStore<C, M>
+impl<C, M> Store<C, M>
 where
     C: Sync,
     M: Sync,
@@ -106,14 +105,14 @@ where
     }
 }
 
-impl<C, M> EventStore for PostgresEventStore<C, M>
+impl<C, M> EventStore for Store<C, M>
 where
     C: Codec + Clone + Send + Sync + 'static,
     M: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     type Id = uuid::Uuid;
     type Position = i64;
-    type Error = PostgresStoreError;
+    type Error = Error;
     type Codec = C;
     type Metadata = M;
 
@@ -176,7 +175,7 @@ where
             .pool
             .begin()
             .await
-            .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+            .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         sqlx::query(
             r"
@@ -189,7 +188,7 @@ where
         .bind(aggregate_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+        .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         let current: Option<i64> = sqlx::query_scalar(
             r"
@@ -203,7 +202,7 @@ where
         .bind(aggregate_id)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+        .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         if let Some(expected) = expected_version
             && current != Some(expected)
@@ -230,11 +229,11 @@ where
             .build_query_scalar()
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+            .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         let last_position = rows
             .last()
-            .ok_or_else(|| AppendError::store(PostgresStoreError::MissingReturnedPosition))?;
+            .ok_or_else(|| AppendError::store(Error::MissingReturnedPosition))?;
 
         sqlx::query(
             r"
@@ -248,11 +247,11 @@ where
         .bind(aggregate_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+        .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         tx.commit()
             .await
-            .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+            .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         Ok(())
     }
@@ -287,7 +286,7 @@ where
 
             if let Some(after) = filter.after_position {
                 if after < 0 {
-                    return Err(PostgresStoreError::InvalidPosition(after));
+                    return Err(Error::InvalidPosition(after));
                 }
                 qb.push(" AND position > ").push_bind(after);
             }
@@ -337,7 +336,7 @@ where
             .pool
             .begin()
             .await
-            .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+            .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         sqlx::query(
             r"
@@ -350,7 +349,7 @@ where
         .bind(aggregate_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+        .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         let current: Option<i64> = sqlx::query_scalar(
             r"
@@ -364,7 +363,7 @@ where
         .bind(aggregate_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+        .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         if let Some(actual) = current {
             return Err(AppendError::Conflict(ConcurrencyConflict {
@@ -389,11 +388,11 @@ where
             .build_query_scalar()
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+            .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         let last_position = rows
             .last()
-            .ok_or_else(|| AppendError::store(PostgresStoreError::MissingReturnedPosition))?;
+            .ok_or_else(|| AppendError::store(Error::MissingReturnedPosition))?;
 
         sqlx::query(
             r"
@@ -407,11 +406,11 @@ where
         .bind(aggregate_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+        .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         tx.commit()
             .await
-            .map_err(|e| AppendError::store(PostgresStoreError::Database(e)))?;
+            .map_err(|e| AppendError::store(Error::Database(e)))?;
 
         Ok(())
     }

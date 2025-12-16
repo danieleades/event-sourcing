@@ -11,7 +11,9 @@ use event_sourcing::repository::{OptimisticCommandError, SnapshotCommandError};
 use event_sourcing::snapshot::{
     InMemorySnapshotStore, OfferSnapshotError, Snapshot, SnapshotOffer, SnapshotStore,
 };
-use event_sourcing::store::{EventStore, InMemoryEventStore, JsonCodec, PersistableEvent};
+use event_sourcing::store::{
+    EventStore, JsonCodec, PersistableEvent, inmemory,
+};
 use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
 use serde::{Deserialize, Serialize};
@@ -248,7 +250,7 @@ async fn in_memory_snapshot_store_policy_never_does_not_save() {
 
 #[tokio::test]
 async fn projection_event_for_filters_by_aggregate() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     repo.execute_command::<Counter, AddValue>(&"c1".to_string(), &AddValue { amount: 10 }, &())
@@ -271,7 +273,7 @@ async fn projection_event_for_filters_by_aggregate() {
 
 #[tokio::test]
 async fn projection_load_surfaces_codec_error_with_event_kind() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     repo.inject_raw_event(
@@ -301,7 +303,7 @@ async fn projection_load_surfaces_codec_error_with_event_kind() {
 
 #[tokio::test]
 async fn unchecked_repository_saves_snapshot_and_exposes_snapshot_store() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let snapshots = InMemorySnapshotStore::always();
     let mut repo = Repository::new(store)
         .with_snapshots(snapshots)
@@ -322,7 +324,7 @@ async fn unchecked_repository_saves_snapshot_and_exposes_snapshot_store() {
 
 #[tokio::test]
 async fn unchecked_execute_command_with_no_events_does_not_persist_or_snapshot() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let snapshots = InMemorySnapshotStore::always();
     let mut repo = Repository::new(store)
         .with_snapshots(snapshots)
@@ -391,7 +393,7 @@ impl SnapshotStore for FailingLoadSnapshotStore {
 
 #[tokio::test]
 async fn snapshot_load_failure_falls_back_to_full_replay() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store)
         .with_snapshots(FailingLoadSnapshotStore)
         .without_concurrency_checking();
@@ -447,7 +449,7 @@ impl SnapshotStore for CorruptSnapshotStore {
 
 #[tokio::test]
 async fn corrupt_snapshot_data_returns_projection_error() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store)
         .with_snapshots(CorruptSnapshotStore)
         .without_concurrency_checking();
@@ -462,7 +464,7 @@ async fn corrupt_snapshot_data_returns_projection_error() {
 
 #[tokio::test]
 async fn execute_with_retry_with_zero_retries_still_attempts_once() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     let attempts = repo
@@ -475,7 +477,7 @@ async fn execute_with_retry_with_zero_retries_still_attempts_once() {
 
 #[tokio::test]
 async fn optimistic_execute_with_retry_surfaces_non_concurrency_errors() {
-    let store = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store);
 
     let err = repo
@@ -539,7 +541,7 @@ impl SnapshotStore for TrackingSnapshotStore {
 
 #[tokio::test]
 async fn aggregate_builder_load_consults_snapshot_store() {
-    let store = InMemoryEventStore::<String, _, ()>::new(JsonCodec);
+    let store = inmemory::Store::<String, _, ()>::new(JsonCodec);
     let snapshots = TrackingSnapshotStore::new();
     let repo = Repository::new(store).with_snapshots(snapshots);
 

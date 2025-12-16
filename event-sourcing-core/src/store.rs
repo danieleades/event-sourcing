@@ -4,8 +4,6 @@
 //! (`PersistableEvent`, `StoredEvent`), transactions, and a reference
 //! in-memory implementation. Filters and positions live here to keep storage
 //! concerns together.
-use std::collections::HashMap;
-use std::convert::Infallible;
 use std::future::Future;
 use std::marker::PhantomData;
 
@@ -14,20 +12,8 @@ use thiserror::Error;
 use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct StreamKey<Id> {
-    aggregate_kind: String,
-    aggregate_id: Id,
-}
+pub mod inmemory;
 
-impl<Id> StreamKey<Id> {
-    pub(crate) fn new(aggregate_kind: impl Into<String>, aggregate_id: Id) -> Self {
-        Self {
-            aggregate_kind: aggregate_kind.into(),
-            aggregate_id,
-        }
-    }
-}
 
 /// Raw event data ready to be written to a store backend.
 ///
@@ -399,292 +385,19 @@ pub trait EventStore: Send + Sync {
 }
 // ANCHOR_END: event_store_trait
 
-/// In-memory event store that keeps streams in a hash map.
-///
-/// Uses a global sequence counter (`Position = u64`) to maintain chronological
-/// ordering across streams, enabling cross-aggregate projections that need to
-/// interleave events by time rather than by stream name.
-///
-/// Generic over:
-/// - `Id`: Aggregate identifier type (must be hashable/equatable for map keys)
-/// - `C`: Serialization codec
-/// - `M`: Metadata type (use `()` when not needed)
-pub struct InMemoryEventStore<Id, C, M>
-where
-    C: Codec,
-{
-    codec: C,
-    streams: HashMap<StreamKey<Id>, Vec<StoredEvent<Id, u64, M>>>,
-    next_position: u64,
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct StreamKey<Id> {
+    aggregate_kind: String,
+    aggregate_id: Id,
 }
 
-impl<Id, C, M> InMemoryEventStore<Id, C, M>
-where
-    C: Codec,
-{
-    #[must_use]
-    pub fn new(codec: C) -> Self {
+impl<Id> StreamKey<Id> {
+    pub(crate) fn new(aggregate_kind: impl Into<String>, aggregate_id: Id) -> Self {
         Self {
-            codec,
-            streams: HashMap::new(),
-            next_position: 0,
-        }
-    }
-}
-
-/// Infallible error type that implements `std::error::Error`.
-///
-/// Used by [`InMemoryEventStore`] which cannot fail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("infallible")]
-pub enum InMemoryError {}
-
-impl From<Infallible> for InMemoryError {
-    fn from(x: Infallible) -> Self {
-        match x {}
-    }
-}
-
-impl<Id, C, M> EventStore for InMemoryEventStore<Id, C, M>
-where
-    Id: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
-    C: Codec + Clone + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
-{
-    type Id = Id;
-    type Position = u64; // Global sequence for chronological ordering
-    type Error = InMemoryError;
-    type Codec = C;
-    type Metadata = M;
-
-    fn codec(&self) -> &Self::Codec {
-        &self.codec
-    }
-
-    #[tracing::instrument(skip(self, aggregate_id))]
-    fn stream_version<'a>(
-        &'a self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-    ) -> impl Future<Output = Result<Option<u64>, Self::Error>> + Send + 'a {
-        let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-        let version = self
-            .streams
-            .get(&stream_key)
-            .and_then(|s| s.last().map(|e| e.position));
-        tracing::trace!(?version, "retrieved stream version");
-        std::future::ready(Ok(version))
-    }
-
-    fn begin<Conc: ConcurrencyStrategy>(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: Self::Id,
-        expected_version: Option<Self::Position>,
-    ) -> Transaction<'_, Self, Conc> {
-        Transaction::new(
-            self,
-            aggregate_kind.to_string(),
+            aggregate_kind: aggregate_kind.into(),
             aggregate_id,
-            expected_version,
-        )
-    }
-
-    #[tracing::instrument(skip(self, aggregate_id, events), fields(event_count = events.len()))]
-    fn append<'a>(
-        &'a mut self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-        expected_version: Option<u64>,
-        events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> impl Future<Output = Result<(), AppendError<u64, Self::Error>>> + Send + 'a {
-        let event_count = events.len();
-
-        let result = (|| {
-            // Check version if provided
-            if let Some(expected) = expected_version {
-                let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-                let current = self
-                    .streams
-                    .get(&stream_key)
-                    .and_then(|s| s.last().map(|e| e.position));
-                if current != Some(expected) {
-                    tracing::debug!(?expected, ?current, "version mismatch, rejecting append");
-                    return Err(ConcurrencyConflict {
-                        expected: Some(expected),
-                        actual: current,
-                    }
-                    .into());
-                }
-            }
-
-            let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-            let stored: Vec<StoredEvent<Id, u64, M>> = events
-                .into_iter()
-                .map(|e| {
-                    let position = self.next_position;
-                    self.next_position += 1;
-                    StoredEvent {
-                        aggregate_kind: aggregate_kind.to_string(),
-                        aggregate_id: aggregate_id.clone(),
-                        kind: e.kind,
-                        position,
-                        data: e.data,
-                        metadata: e.metadata,
-                    }
-                })
-                .collect();
-
-            self.streams.entry(stream_key).or_default().extend(stored);
-            tracing::debug!(events_appended = event_count, "events appended to stream");
-            Ok(())
-        })();
-
-        std::future::ready(result)
-    }
-
-    #[tracing::instrument(skip(self, aggregate_id, events), fields(event_count = events.len()))]
-    fn append_expecting_new<'a>(
-        &'a mut self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-        events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> impl Future<Output = Result<(), AppendError<u64, Self::Error>>> + Send + 'a {
-        let event_count = events.len();
-
-        let result = (|| {
-            // Check that stream is empty (new aggregate)
-            let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-            let current = self
-                .streams
-                .get(&stream_key)
-                .and_then(|s| s.last().map(|e| e.position));
-
-            if let Some(actual) = current {
-                // Stream already has events - conflict!
-                tracing::debug!(
-                    ?actual,
-                    "stream already exists, rejecting new aggregate append"
-                );
-                return Err(ConcurrencyConflict {
-                    expected: None, // "expected new stream"
-                    actual: Some(actual),
-                }
-                .into());
-            }
-
-            // Stream is empty, proceed with append (no further version check needed)
-            let stream_key = StreamKey::new(aggregate_kind, aggregate_id.clone());
-            let stored: Vec<StoredEvent<Id, u64, M>> = events
-                .into_iter()
-                .map(|e| {
-                    let position = self.next_position;
-                    self.next_position += 1;
-                    StoredEvent {
-                        aggregate_kind: aggregate_kind.to_string(),
-                        aggregate_id: aggregate_id.clone(),
-                        kind: e.kind,
-                        position,
-                        data: e.data,
-                        metadata: e.metadata,
-                    }
-                })
-                .collect();
-
-            self.streams.entry(stream_key).or_default().extend(stored);
-            tracing::debug!(
-                events_appended = event_count,
-                "new stream created with events"
-            );
-            Ok(())
-        })();
-
-        std::future::ready(result)
-    }
-
-    #[tracing::instrument(skip(self, filters), fields(filter_count = filters.len()))]
-    fn load_events<'a>(
-        &'a self,
-        filters: &'a [EventFilter<Self::Id, Self::Position>],
-    ) -> impl Future<Output = Result<Vec<StoredEvent<Id, u64, M>>, Self::Error>> + Send + 'a {
-        use std::collections::HashSet;
-
-        let mut result = Vec::new();
-        let mut seen: HashSet<(StreamKey<Id>, String)> = HashSet::new(); // (stream key, event kind)
-
-        // Group filters by aggregate ID, tracking each filter's individual position constraint
-        // Maps event_kind -> after_position for that specific filter
-        let mut all_kinds: HashMap<String, Option<u64>> = HashMap::new(); // Filters with no aggregate restriction
-        let mut by_aggregate: HashMap<StreamKey<Id>, HashMap<String, Option<u64>>> = HashMap::new(); // Filters targeting a specific aggregate
-
-        for filter in filters {
-            if let (Some(kind), Some(id)) = (&filter.aggregate_kind, &filter.aggregate_id) {
-                by_aggregate
-                    .entry(StreamKey::new(kind.clone(), id.clone()))
-                    .or_default()
-                    .insert(filter.event_kind.clone(), filter.after_position);
-            } else {
-                all_kinds.insert(filter.event_kind.clone(), filter.after_position);
-            }
         }
-
-        // Helper to check position filter for a specific after_position constraint
-        let passes_position_filter =
-            |event: &StoredEvent<Id, u64, M>, after_position: Option<u64>| -> bool {
-                after_position.is_none_or(|after| event.position > after)
-            };
-
-        // Load events for specific aggregates
-        for (stream_key, kinds) in &by_aggregate {
-            if let Some(stream) = self.streams.get(stream_key) {
-                for event in stream {
-                    // Check if this event kind is requested AND passes its specific position filter
-                    if let Some(&after_pos) = kinds.get(&event.kind)
-                        && passes_position_filter(event, after_pos)
-                    {
-                        // Track that we've seen this (aggregate_kind, aggregate_id, kind) triple
-                        seen.insert((
-                            StreamKey::new(
-                                event.aggregate_kind.clone(),
-                                event.aggregate_id.clone(),
-                            ),
-                            event.kind.clone(),
-                        ));
-                        result.push(event.clone());
-                    }
-                }
-            }
-        }
-
-        // Load events from all aggregates for unfiltered kinds
-        // Skip events we've already loaded for specific aggregates
-        if !all_kinds.is_empty() {
-            for stream in self.streams.values() {
-                for event in stream {
-                    // Check if this event kind is requested AND passes its specific position filter
-                    if let Some(&after_pos) = all_kinds.get(&event.kind)
-                        && passes_position_filter(event, after_pos)
-                    {
-                        let key = (
-                            StreamKey::new(
-                                event.aggregate_kind.clone(),
-                                event.aggregate_id.clone(),
-                            ),
-                            event.kind.clone(),
-                        );
-                        if !seen.contains(&key) {
-                            result.push(event.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sort by position for chronological ordering across streams
-        result.sort_by_key(|event| event.position);
-
-        tracing::debug!(events_loaded = result.len(), "loaded events from store");
-        std::future::ready(Ok(result))
     }
 }
 
@@ -712,6 +425,8 @@ impl crate::codec::Codec for JsonCodec {
 
 #[cfg(test)]
 mod tests {
+    use crate::store::inmemory;
+
     use super::*;
 
     #[test]
@@ -778,7 +493,7 @@ mod tests {
     }
 
     async fn append_raw_event(
-        store: &mut InMemoryEventStore<String, JsonCodec, ()>,
+        store: &mut inmemory::Store<String, JsonCodec, ()>,
         aggregate_kind: &str,
         aggregate_id: &str,
         event_kind: &str,
@@ -801,8 +516,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_appends_and_loads_single_event() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         let data = br#"{"amount":10}"#;
 
         append_raw_event(&mut store, "counter", "c1", "value-added", data).await;
@@ -820,8 +535,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_loads_multiple_kinds_from_one_stream() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(
             &mut store,
             "counter",
@@ -852,7 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_returns_empty_when_no_events_match() {
-        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let events = store
             .load_events(&[EventFilter::for_event("nonexistent")])
             .await
@@ -862,8 +577,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_filters_by_event_kind_and_aggregate_id() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
         append_raw_event(&mut store, "counter", "c2", "value-added", b"{}").await;
 
@@ -876,8 +591,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_orders_events_by_global_position() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
         append_raw_event(&mut store, "counter", "c2", "value-added", b"{}").await;
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
@@ -896,8 +611,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_deduplicates_overlapping_filters() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
         let filters = vec![
@@ -910,8 +625,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_applies_after_position_filter() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 0
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 1
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await; // pos 2
@@ -927,7 +642,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_stream_version_is_none_for_empty_stream() {
-        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let version = store
             .stream_version("counter", &"nonexistent".to_string())
             .await
@@ -937,8 +652,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_event_store_version_checking_detects_conflict() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "value-added", b"{}").await;
 
         let ok = store
@@ -998,8 +713,8 @@ mod tests {
 
     #[tokio::test]
     async fn unchecked_transaction_commit_persists_events() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         let mut tx =
             store.begin::<crate::concurrency::Unchecked>("counter", "c1".to_string(), None);
         tx.append(TestEvent::Added(TestAdded { amount: 10 }), ())
@@ -1017,8 +732,8 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_transaction_without_commit_discards_buffered_events() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         {
             let mut tx =
                 store.begin::<crate::concurrency::Unchecked>("counter", "c1".to_string(), None);
@@ -1035,8 +750,8 @@ mod tests {
 
     #[tokio::test]
     async fn optimistic_transaction_detects_stale_expected_version() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "added", br#"{"amount":10}"#).await;
 
         let mut tx =
@@ -1050,8 +765,8 @@ mod tests {
 
     #[tokio::test]
     async fn optimistic_transaction_detects_non_new_stream_when_expect_new() {
-        let mut store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let mut store: inmemory::Store<String, JsonCodec, ()> =
+            inmemory::Store::new(JsonCodec);
         append_raw_event(&mut store, "counter", "c1", "added", br#"{"amount":10}"#).await;
 
         let mut tx =
