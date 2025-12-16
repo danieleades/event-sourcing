@@ -1,5 +1,8 @@
 # sourcery
 
+[![Continuous integration](https://github.com/danieleades/sourcery/actions/workflows/CI.yml/badge.svg)](https://github.com/danieleades/sourcery/actions/workflows/CI.yml)
+[![codecov](https://codecov.io/gh/danieleades/sourcery/graph/badge.svg?token=CteU2EuZf8)](https://codecov.io/gh/danieleades/sourcery)
+
 Building blocks for pragmatic event-sourced systems in Rust. The crate focuses on keeping
 domain types pure while giving you the tools to rebuild state, project read models, and
 persist events through a pluggable store interface.
@@ -18,19 +21,26 @@ persist events through a pluggable store interface.
 - **Store agnostic** – ships with an in-memory store for demos/tests; implement the
   `EventStore` trait to plug in your own persistence.
 
+## Documentation
+
+**[Full documentation](https://danieleades.github.io/sourcery/)** — Conceptual guides,
+API reference, and runnable examples.
+
+see also, the [API docs](https://docs.rs/sourcery/latest/sourcery/)
+
 ## How this differs from other Rust event-sourcing crates
 
 This crate borrows inspiration from projects like
 [`eventually`](https://github.com/get-eventually/eventually-rs) and
 [`cqrs`](https://github.com/serverlesstechnology/cqrs) but makes a few different trade-offs:
 
-- **Events stay as first-class structs.** Instead of immediately wrapping events in
+- **Events are first-class structs.** Instead of immediately wrapping events in
   aggregate-specific enums, each `DomainEvent` stands on its own. Multiple aggregates (or
   even completely unrelated subsystems) can reuse the same event type. Projections receive
   aggregate identifiers and metadata alongside events rather than relying on the payload
   to embed IDs.
 
-- **Projections are fully decoupled.** Read models don’t have to depend on a particular
+- **Projections are fully decoupled from Aggregates.** Read models don’t have to depend on a particular
   aggregate enum or repository type. You declare the events you care about—potentially
   pulling from several aggregate kinds—and compose them via the builder. The fluent
   `ProjectionBuilder` keeps common cases ergonomic while still leaving room for custom
@@ -221,11 +231,6 @@ cargo run --example versioned_events
 cargo run --example advanced_projection
 cargo run --example optimistic_concurrency
 ```
-
-## Documentation
-
-**[Full documentation](https://danieleades.github.io/sourcery/)** — Conceptual guides,
-API reference, and runnable examples.
 
 ## Status
 
