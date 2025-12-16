@@ -231,3 +231,7 @@ API reference, and runnable examples.
 
 The crate is still pre-1.0. Expect APIs to evolve as real-world usage grows. Feedback and
 contributions are welcome! Submit an issue or pull request if you spot something missing. 
+
+## 📜 Licensing
+
+This project is publicly available under the **GNU General Public License v3.0**. It may optionally be distributed under the **MIT license by commercial arrangement.
