@@ -4,17 +4,17 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
-use event_sourcing::concurrency::ConcurrencyConflict;
-use event_sourcing::projection::ProjectionError;
-use event_sourcing::repository::{OptimisticCommandError, SnapshotCommandError};
-use event_sourcing::snapshot::{
+use serde::{Deserialize, Serialize};
+use sourcery::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
+use sourcery::concurrency::ConcurrencyConflict;
+use sourcery::projection::ProjectionError;
+use sourcery::repository::{OptimisticCommandError, SnapshotCommandError};
+use sourcery::snapshot::{
     InMemorySnapshotStore, OfferSnapshotError, Snapshot, SnapshotOffer, SnapshotStore,
 };
-use event_sourcing::store::{EventStore, JsonCodec, PersistableEvent, inmemory};
-use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
-use serde::{Deserialize, Serialize};
+use sourcery::store::{EventStore, JsonCodec, PersistableEvent, inmemory};
+use sourcery::test::RepositoryTestExt;
+use sourcery::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,10 +1,10 @@
-# Code Review: `event-sourcing-postgres`
+# Code Review: `sourcery-postgres`
 
-Scope: `event-sourcing-postgres` as currently implemented in `event-sourcing-postgres/src/lib.rs` (single-file crate providing `PostgresEventStore` and a small schema helper).
+Scope: `sourcery-postgres` as currently implemented in `sourcery-postgres/src/lib.rs` (single-file crate providing `PostgresEventStore` and a small schema helper).
 
 ## Executive summary
 
-This crate is a clean, minimal `sqlx`-based Postgres implementation of `event_sourcing_core::store::EventStore`. The transactional append path is sound (row-locking a per-stream record, inserting events, then updating stream head in a single DB transaction) and matches the design described in `STORES.md`.
+This crate is a clean, minimal `sqlx`-based Postgres implementation of `sourcery_core::store::EventStore`. The transactional append path is sound (row-locking a per-stream record, inserting events, then updating stream head in a single DB transaction) and matches the design described in `STORES.md`.
 
 The main gaps are around operability and edge-case correctness:
 
@@ -43,7 +43,7 @@ Recommendations:
 
 Proposed solution (sketch):
 
-- Add `event-sourcing-postgres/migrations/` and switch `migrate()` to `sqlx::migrate!().run(&self.pool).await?`.
+- Add `sourcery-postgres/migrations/` and switch `migrate()` to `sqlx::migrate!().run(&self.pool).await?`.
 - Put initial schema in `0001_init.sql` and add future migrations as additional numbered files.
 - Document operational guidance: run migrations as a separate deployment step; use `CREATE INDEX CONCURRENTLY` for new indexes on large tables.
 
@@ -150,9 +150,9 @@ Proposed solution (sketch):
 
 ## Testing gaps
 
-There are currently no tests in `event-sourcing-postgres/`.
+There are currently no tests in `sourcery-postgres/`.
 
-Minimum recommended coverage (ideally in `event-sourcing-postgres/tests/` behind a feature flag):
+Minimum recommended coverage (ideally in `sourcery-postgres/tests/` behind a feature flag):
 
 - `migrate` is idempotent (can run twice).
 - `append_expecting_new` conflicts when stream already exists with events.
@@ -162,7 +162,7 @@ Minimum recommended coverage (ideally in `event-sourcing-postgres/tests/` behind
 
 Proposed solution (sketch):
 
-- Add `event-sourcing-postgres/tests/postgres_store.rs` using `#[tokio::test]`.
+- Add `sourcery-postgres/tests/postgres_store.rs` using `#[tokio::test]`.
 - Read `DATABASE_URL` from env and `return`/`ignore` if missing (or gate behind a `postgres-test` feature).
 - Use a unique schema per test run (e.g. `CREATE SCHEMA es_test_<uuid>` and set `search_path`) or unique table prefixes to keep tests isolated without requiring a dedicated database instance.
 

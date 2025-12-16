@@ -5,7 +5,7 @@ The crate separates storage concerns into three traits: `EventStore` for event p
 ## The `EventStore` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/store.rs:event_store_trait}}
+{{#include ../../../sourcery-core/src/store.rs:event_store_trait}}
 ```
 
 ## Built-in: `inmemory::Store`
@@ -13,7 +13,7 @@ The crate separates storage concerns into three traits: `EventStore` for event p
 For testing and prototyping:
 
 ```rust,ignore
-use event_sourcing::store::{inmemory, JsonCodec};
+use sourcery::store::{inmemory, JsonCodec};
 
 // With unit metadata
 let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
@@ -32,7 +32,7 @@ Features:
 Events are appended within a transaction for atomicity:
 
 ```rust,ignore
-use event_sourcing::concurrency::Unchecked;
+use sourcery::concurrency::Unchecked;
 
 let mut tx = store.begin::<Unchecked>("account", "ACC-001".to_string(), None);
 tx.append(event1, metadata.clone())?;
@@ -60,7 +60,7 @@ EventFilter::for_event("account.deposited").after(100)
 ## The `Codec` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/codec.rs:codec_trait}}
+{{#include ../../../sourcery-core/src/codec.rs:codec_trait}}
 ```
 
 ## Built-in: `JsonCodec`
@@ -68,7 +68,7 @@ EventFilter::for_event("account.deposited").after(100)
 Uses `serde_json` for human-readable storage:
 
 ```rust,ignore
-use event_sourcing::JsonCodec;
+use sourcery::JsonCodec;
 
 let codec = JsonCodec;
 ```
@@ -81,7 +81,7 @@ For production, consider implementing codecs for:
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/snapshot.rs:snapshot_store_trait}}
+{{#include ../../../sourcery-core/src/snapshot.rs:snapshot_store_trait}}
 ```
 
 See [Snapshots](../advanced/snapshots.md) for details.

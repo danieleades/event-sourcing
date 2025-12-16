@@ -11,7 +11,7 @@
 //! for testing aggregate behavior in isolation, without requiring a real event store.
 //!
 //! ```ignore
-//! use event_sourcing::test::TestFramework;
+//! use sourcery::test::TestFramework;
 //!
 //! type CounterTest = TestFramework<Counter>;
 //!
@@ -41,7 +41,7 @@
 //! For integration tests that need a real repository, use [`RepositoryTestExt`]:
 //!
 //! ```ignore
-//! use event_sourcing::test::RepositoryTestExt;
+//! use sourcery::test::RepositoryTestExt;
 //!
 //! // Seed initial events (e.g., for projection tests)
 //! repo.seed_events::<Product>(&product_id, vec![
@@ -101,7 +101,7 @@ type SeedResult<S> =
 /// # Example
 ///
 /// ```ignore
-/// use event_sourcing::test::RepositoryTestExt;
+/// use sourcery::test::RepositoryTestExt;
 ///
 /// // Seed initial state for a projection test
 /// repo.seed_events::<Product>(&product_id, vec![

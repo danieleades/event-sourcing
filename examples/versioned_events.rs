@@ -16,12 +16,12 @@
 //!
 //! Run with: `cargo run --example versioned_events`
 
-use event_sourcing::codec::ProjectionEvent;
-use event_sourcing::store::EventStore;
-use event_sourcing::store::{EventFilter, JsonCodec, inmemory};
-use event_sourcing::{Aggregate, Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
 use serde_evolve::Versioned;
+use sourcery::codec::ProjectionEvent;
+use sourcery::store::EventStore;
+use sourcery::store::{EventFilter, JsonCodec, inmemory};
+use sourcery::{Aggregate, Apply, DomainEvent, Handle, Repository};
 
 // =============================================================================
 // Versioned Domain Event - OrderPlaced
@@ -351,7 +351,7 @@ impl Handle<CancelOrder> for Order {
 #[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Versioned Events with Event Sourcing ===\n");
+    println!("=== Versioned Events with Sourcery ===\n");
 
     // Use OrderMetadata (versioned) as the metadata type for the store
     let store: inmemory::Store<String, JsonCodec, OrderMetadata> = inmemory::Store::new(JsonCodec);

@@ -1,17 +1,17 @@
 //! Postgres-backed event store implementation.
 //!
 //! This crate provides [`PostgresEventStore`], an implementation of
-//! [`event_sourcing_core::store::EventStore`] for `PostgreSQL`.
+//! [`sourcery_core::store::EventStore`] for `PostgreSQL`.
 
 use std::marker::PhantomData;
 
-use event_sourcing_core::codec::Codec;
-use event_sourcing_core::concurrency::{ConcurrencyConflict, ConcurrencyStrategy};
-use event_sourcing_core::store::{
+use serde::{Serialize, de::DeserializeOwned};
+use sourcery_core::codec::Codec;
+use sourcery_core::concurrency::{ConcurrencyConflict, ConcurrencyStrategy};
+use sourcery_core::store::{
     AppendError, EventFilter, EventStore, LoadEventsResult, PersistableEvent, StoredEvent,
     Transaction,
 };
-use serde::{Serialize, de::DeserializeOwned};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 
 #[derive(Debug, thiserror::Error)]

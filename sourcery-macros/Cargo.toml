@@ -1,5 +1,5 @@
 [package]
-name = "event-sourcing-macros"
+name = "sourcery-macros"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

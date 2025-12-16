@@ -5,7 +5,7 @@ The `inmemory::Store` is useful for testing, but production systems need durable
 ## The EventStore Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/store.rs:event_store_trait}}
+{{#include ../../../sourcery-core/src/store.rs:event_store_trait}}
 ```
 
 ## Design Decisions
@@ -47,10 +47,10 @@ CREATE INDEX idx_events_kind
 
 ```rust,ignore
 use std::future::Future;
-use event_sourcing::store::{
+use sourcery::store::{
     AppendError, EventFilter, EventStore, JsonCodec, PersistableEvent, StoredEvent, Transaction,
 };
-use event_sourcing::concurrency::ConcurrencyStrategy;
+use sourcery::concurrency::ConcurrencyStrategy;
 
 pub struct PostgresEventStore {
     pool: sqlx::PgPool,

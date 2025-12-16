@@ -1,9 +1,9 @@
 [workspace]
 members = [
     ".",
-    "event-sourcing-core",
-    "event-sourcing-macros",
-    "event-sourcing-postgres",
+    "sourcery-core",
+    "sourcery-macros",
+    "sourcery-postgres",
 ]
 
 [workspace.package]
@@ -17,7 +17,7 @@ pedantic = "warn"
 nursery = "warn"
 
 [package]
-name = "event-sourcing"
+name = "sourcery"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -28,13 +28,13 @@ workspace = true
 
 [features]
 default = []
-test-util = ["event-sourcing-core/test-util"]
-postgres = ["dep:event-sourcing-postgres"]
+test-util = ["sourcery-core/test-util"]
+postgres = ["dep:sourcery-postgres"]
 
 [dependencies]
-event-sourcing-core = { path = "event-sourcing-core" }
-event-sourcing-macros = { path = "event-sourcing-macros" }
-event-sourcing-postgres = { path = "event-sourcing-postgres", optional = true }
+sourcery-core = { path = "sourcery-core" }
+sourcery-macros = { path = "sourcery-macros" }
+sourcery-postgres = { path = "sourcery-postgres", optional = true }
 
 [dev-dependencies]
 anyhow = { version = "1", default-features = false, features = ["std"] }

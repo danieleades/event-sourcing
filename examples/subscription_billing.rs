@@ -1,7 +1,7 @@
 //! Subscription Billing Example – Command/Query split with cross-aggregate projection
 //!
 //! This example demonstrates a realistic CQRS flow using the primitives provided by the
-//! `event-sourcing` crate:
+//! `sourcery` crate:
 //! - **Subscription aggregate** drives the customer lifecycle (activation/cancellation).
 //! - **Invoice aggregate** handles billing and payments for a specific customer invoice.
 //! - **`CustomerBillingProjection`** consumes events from *both* aggregates to maintain
@@ -19,11 +19,11 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use event_sourcing::{
+use serde::{Deserialize, Serialize};
+use sourcery::{
     Aggregate, Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
     store::{JsonCodec, inmemory},
 };
-use serde::{Deserialize, Serialize};
 
 // =============================================================================
 // Shared domain types

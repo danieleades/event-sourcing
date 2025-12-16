@@ -1,5 +1,5 @@
 [package]
-name = "event-sourcing-postgres"
+name = "sourcery-postgres"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-event-sourcing-core = { path = "../event-sourcing-core" }
+sourcery-core = { path = "../sourcery-core" }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 sqlx = { version = "0.8.3", default-features = false, features = ["json", "postgres", "runtime-tokio-rustls", "uuid"] }
 thiserror = { version = "2", default-features = false, features = ["std"] }

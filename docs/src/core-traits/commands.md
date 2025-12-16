@@ -5,7 +5,7 @@ Commands represent requests to change the system. Unlike events (which are facts
 ## The `Handle<C>` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/aggregate.rs:handle_trait}}
+{{#include ../../../sourcery-core/src/aggregate.rs:handle_trait}}
 ```
 
 Key points:

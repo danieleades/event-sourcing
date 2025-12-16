@@ -240,7 +240,7 @@ impl SnapshotPolicy {
 /// # Example
 ///
 /// ```ignore
-/// use event_sourcing::{Repository, InMemoryEventStore, InMemorySnapshotStore, JsonCodec};
+/// use sourcery::{Repository, InMemoryEventStore, InMemorySnapshotStore, JsonCodec};
 ///
 /// let repo = Repository::new(InMemoryEventStore::new(JsonCodec))
 ///     .with_snapshots(InMemorySnapshotStore::every(100));

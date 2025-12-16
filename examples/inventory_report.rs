@@ -12,11 +12,11 @@
 //! - **`ApplyProjection` + builder**: Projections access `aggregate_kind`, `aggregate_id`, and metadata
 //! - **External IDs**: Aggregates treat IDs as infrastructure metadata supplied by the repository
 
-use event_sourcing::{
+use serde::{Deserialize, Serialize};
+use sourcery::{
     Aggregate, Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
     store::{JsonCodec, inmemory},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // =============================================================================

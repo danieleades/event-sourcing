@@ -11,11 +11,11 @@
 
 use std::collections::HashMap;
 
-use event_sourcing::Aggregate;
-use event_sourcing::store::{JsonCodec, inmemory};
-use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{Apply, ApplyProjection, DomainEvent, Projection, Repository};
 use serde::{Deserialize, Serialize};
+use sourcery::Aggregate;
+use sourcery::store::{JsonCodec, inmemory};
+use sourcery::test::RepositoryTestExt;
+use sourcery::{Apply, ApplyProjection, DomainEvent, Projection, Repository};
 
 // =============================================================================
 // Aggregates and domain events

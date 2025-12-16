@@ -3,11 +3,11 @@
 
 #[cfg(feature = "test-util")]
 mod with_test_util {
-    use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
-    use event_sourcing::store::PersistableEvent;
-    use event_sourcing::test::TestFramework;
-    use event_sourcing::{Aggregate, DomainEvent, Handle};
     use serde::{Deserialize, Serialize};
+    use sourcery::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
+    use sourcery::store::PersistableEvent;
+    use sourcery::test::TestFramework;
+    use sourcery::{Aggregate, DomainEvent, Handle};
 
     // ============================================================================
     // Test Domain: Bank Account

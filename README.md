@@ -1,4 +1,4 @@
-# event-sourcing
+# sourcery
 
 Building blocks for pragmatic event-sourced systems in Rust. The crate focuses on keeping
 domain types pure while giving you the tools to rebuild state, project read models, and
@@ -76,7 +76,7 @@ The snippet below wires together a single aggregate, a projection, and a reposit
 the aggregate derive and the in-memory store.
 
 ```rust,no_run
-use event_sourcing::{
+use sourcery::{
     Apply, ApplyProjection, DomainEvent, Handle, store::{inmemory, JsonCodec},
     Projection, Repository,
 };
@@ -102,7 +102,7 @@ pub struct DepositFunds {
 
 // === Aggregate ===
 
-#[derive(Debug, Default, event_sourcing::Aggregate, Serialize, Deserialize)]
+#[derive(Debug, Default, sourcery::Aggregate, Serialize, Deserialize)]
 #[aggregate(id = String, error = String, events(FundsDeposited))]
 pub struct Account {
     balance_cents: i64,
@@ -173,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See the [examples](https://github.com/danieleades/event-sourcing/tree/main/examples) for larger, end-to-end scenarios (composite IDs, CQRS dashboards,
+See the [examples](https://github.com/danieleades/sourcery/tree/main/examples) for larger, end-to-end scenarios (composite IDs, CQRS dashboards,
 versioned events, etc.).
 
 ## Core concepts
@@ -224,7 +224,7 @@ cargo run --example optimistic_concurrency
 
 ## Documentation
 
-**[Full documentation](https://danieleades.github.io/event-sourcing/)** — Conceptual guides,
+**[Full documentation](https://danieleades.github.io/sourcery/)** — Conceptual guides,
 API reference, and runnable examples.
 
 ## Status

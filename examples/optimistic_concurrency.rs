@@ -6,11 +6,11 @@
 //!
 //! Run with: `cargo run --example optimistic_concurrency`
 
-use event_sourcing::repository::OptimisticCommandError;
-use event_sourcing::store::{JsonCodec, inmemory};
-use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
+use sourcery::repository::OptimisticCommandError;
+use sourcery::store::{JsonCodec, inmemory};
+use sourcery::test::RepositoryTestExt;
+use sourcery::{Apply, DomainEvent, Handle, Repository};
 
 // =============================================================================
 // Domain Events
@@ -52,7 +52,7 @@ pub struct RestockItem {
 // Aggregate
 // =============================================================================
 
-#[derive(Debug, Default, Serialize, Deserialize, event_sourcing::Aggregate)]
+#[derive(Debug, Default, Serialize, Deserialize, sourcery::Aggregate)]
 #[aggregate(id = String, error = InventoryError, events(ItemReserved, ItemRestocked))]
 pub struct InventoryItem {
     available: u32,

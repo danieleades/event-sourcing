@@ -5,7 +5,7 @@ The `#[derive(Aggregate)]` macro eliminates boilerplate by generating the event 
 ## Basic Usage
 
 ```rust,ignore
-use event_sourcing::Aggregate;
+use sourcery::Aggregate;
 
 #[derive(Debug, Default, Serialize, Deserialize, Aggregate)]
 #[aggregate(id = String, error = String, events(FundsDeposited, FundsWithdrawn))]

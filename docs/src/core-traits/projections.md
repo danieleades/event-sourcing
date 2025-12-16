@@ -5,7 +5,7 @@ Projections are read models built by replaying events. They're optimized for que
 ## The `Projection` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/projection.rs:projection_trait}}
+{{#include ../../../sourcery-core/src/projection.rs:projection_trait}}
 ```
 
 Projections must be `Default` because they start empty and build up through event replay.
@@ -13,7 +13,7 @@ Projections must be `Default` because they start empty and build up through even
 ## The `ApplyProjection<E>` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/projection.rs:apply_projection_trait}}
+{{#include ../../../sourcery-core/src/projection.rs:apply_projection_trait}}
 ```
 
 Unlike aggregate `Apply`, projections receive:

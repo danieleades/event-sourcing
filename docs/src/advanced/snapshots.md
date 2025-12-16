@@ -29,7 +29,7 @@ Instead of replaying 1050 events, you load the snapshot and replay only 50.
 Use `with_snapshots()` when creating the repository:
 
 ```rust,ignore
-use event_sourcing::{Repository, snapshot::InMemorySnapshotStore, store::{inmemory, JsonCodec}};
+use sourcery::{Repository, snapshot::InMemorySnapshotStore, store::{inmemory, JsonCodec}};
 
 let event_store = inmemory::Store::new(JsonCodec);
 let snapshot_store = InMemorySnapshotStore::always();
@@ -75,7 +75,7 @@ Use for: Read-only replicas, debugging.
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-{{#include ../../../event-sourcing-core/src/snapshot.rs:snapshot_store_trait}}
+{{#include ../../../sourcery-core/src/snapshot.rs:snapshot_store_trait}}
 ```
 
 The repository calls `offer_snapshot` after successfully appending new events. Implementations may decline without invoking `create_snapshot`, avoiding unnecessary snapshot encoding work.

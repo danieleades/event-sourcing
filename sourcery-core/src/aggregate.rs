@@ -90,6 +90,10 @@ pub trait Apply<E> {
 // ANCHOR: handle_trait
 pub trait Handle<C>: Aggregate {
     /// Handle a command and produce events.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the command is invalid for the current aggregate state.
     fn handle(&self, command: &C) -> Result<Vec<Self::Event>, Self::Error>;
 }
 // ANCHOR_END: handle_trait
