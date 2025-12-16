@@ -27,6 +27,7 @@ use crate::{
 ///
 /// If you enable snapshots (via `Repository::with_snapshots`), the aggregate state must be
 /// serializable (`Serialize + DeserializeOwned`).
+// ANCHOR: aggregate_trait
 pub trait Aggregate: Default + Sized {
     /// Aggregate type identifier used by the event store.
     ///
@@ -46,6 +47,7 @@ pub trait Aggregate: Default + Sized {
     /// For hand-written aggregates, implement this directly with a match expression.
     fn apply(&mut self, event: &Self::Event);
 }
+// ANCHOR_END: aggregate_trait
 
 /// Mutate an aggregate with a domain event.
 ///
@@ -64,9 +66,11 @@ pub trait Aggregate: Default + Sized {
 ///     }
 /// }
 /// ```
+// ANCHOR: apply_trait
 pub trait Apply<E> {
     fn apply(&mut self, event: &E);
 }
+// ANCHOR_END: apply_trait
 
 /// Entry point for command handling.
 ///
@@ -83,17 +87,12 @@ pub trait Apply<E> {
 ///     }
 /// }
 /// ```
+// ANCHOR: handle_trait
 pub trait Handle<C>: Aggregate {
     /// Handle a command and produce events.
-    ///
-    /// Aggregates are pure functions of state and command.
-    /// The aggregate ID is infrastructure metadata, not needed for business logic.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the command cannot be handled due to business rule violations.
     fn handle(&self, command: &C) -> Result<Vec<Self::Event>, Self::Error>;
 }
+// ANCHOR_END: handle_trait
 
 /// Builder for loading aggregates by ID.
 pub struct AggregateBuilder<'a, R, A> {

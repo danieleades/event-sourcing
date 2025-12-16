@@ -6,18 +6,16 @@ the stream version hasn't changed between loading the aggregate and committing n
 
 ## Default Behavior
 
-By default, repositories use **optimistic concurrency**—version checking is performed on
-every write. This is the safe default for production systems.
+By default, repositories use **optimistic concurrency**—version checking is performed on every write. This is the safe default for production systems.
 
 ```rust,ignore
-use event_sourcing::{Repository, InMemoryEventStore, JsonCodec};
+use event_sourcing::{Repository, store::{inmemory, JsonCodec}};
 
-let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
 let mut repo = Repository::new(store); // Optimistic concurrency enabled
 ```
 
-The concurrency strategy is encoded in the type system, so you get compile-time guarantees
-about which error types you need to handle.
+The concurrency strategy is encoded in the type system, so you get compile-time guarantees about which error types you need to handle.
 
 ## Disabling Concurrency Checking
 
@@ -103,8 +101,7 @@ operation is attempted up to `max_retries + 1` times total.
 3. The store checks if the actual version matches the expected version
 4. If they differ, the store returns a `ConcurrencyConflict` error
 
-The `InMemoryEventStore` supports this via its `stream_version()` method and the
-`expected_version` parameter on `append()`.
+The `inmemory::Store` supports this via its `stream_version()` method and the `expected_version` parameter on `append()`.
 
 ## Example
 

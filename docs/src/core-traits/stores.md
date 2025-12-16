@@ -5,21 +5,21 @@ The crate separates storage concerns into three traits: `EventStore` for event p
 ## The `EventStore` Trait
 
 ```rust,ignore
-{{#include ../../../src/store.rs:event_store_trait}}
+{{#include ../../../event-sourcing-core/src/store.rs:event_store_trait}}
 ```
 
-## Built-in: `InMemoryEventStore`
+## Built-in: `inmemory::Store`
 
 For testing and prototyping:
 
 ```rust,ignore
-use event_sourcing::{InMemoryEventStore, JsonCodec};
+use event_sourcing::store::{inmemory, JsonCodec};
 
 // With unit metadata
-let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
 
 // With custom metadata
-let store: InMemoryEventStore<String, JsonCodec, MyMetadata> = InMemoryEventStore::new(JsonCodec);
+let store: inmemory::Store<String, JsonCodec, MyMetadata> = inmemory::Store::new(JsonCodec);
 ```
 
 Features:
@@ -32,12 +32,12 @@ Features:
 Events are appended within a transaction for atomicity:
 
 ```rust,ignore
-use event_sourcing::Unchecked;
+use event_sourcing::concurrency::Unchecked;
 
 let mut tx = store.begin::<Unchecked>("account", "ACC-001".to_string(), None);
 tx.append(event1, metadata.clone())?;
 tx.append(event2, metadata.clone())?;
-tx.commit()?; // Events visible only after commit
+tx.commit().await?; // Events visible only after commit
 ```
 
 If the transaction is dropped without committing, no events are persisted.
@@ -60,7 +60,7 @@ EventFilter::for_event("account.deposited").after(100)
 ## The `Codec` Trait
 
 ```rust,ignore
-{{#include ../../../src/codec.rs:codec_trait}}
+{{#include ../../../event-sourcing-core/src/codec.rs:codec_trait}}
 ```
 
 ## Built-in: `JsonCodec`
@@ -81,28 +81,7 @@ For production, consider implementing codecs for:
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-pub trait SnapshotStore {
-    type Id;
-    type Position;
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    fn load<'a>(
-        &'a self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-    ) -> impl Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>> + Send + 'a;
-
-    fn offer_snapshot<'a, CE, Create>(
-        &'a mut self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-        events_since_last_snapshot: u64,
-        create_snapshot: Create,
-    ) -> impl Future<Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>> + Send + 'a
-    where
-        CE: std::error::Error + Send + Sync + 'static,
-        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a;
-}
+{{#include ../../../event-sourcing-core/src/snapshot.rs:snapshot_store_trait}}
 ```
 
 See [Snapshots](../advanced/snapshots.md) for details.

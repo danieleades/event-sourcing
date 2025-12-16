@@ -45,6 +45,7 @@ pub struct Snapshot<Pos> {
 /// - Always save: useful for aggregates with expensive replay
 /// - Every N events: balance between storage and replay cost
 /// - Never save: read-only replicas that only load snapshots created elsewhere
+// ANCHOR: snapshot_store_trait
 pub trait SnapshotStore: Send + Sync {
     /// Aggregate identifier type.
     ///
@@ -97,6 +98,7 @@ pub trait SnapshotStore: Send + Sync {
         CE: std::error::Error + Send + Sync + 'static,
         Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a;
 }
+// ANCHOR_END: snapshot_store_trait
 
 /// Result of offering a snapshot to a store.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

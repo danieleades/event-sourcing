@@ -77,7 +77,7 @@ the aggregate derive and the in-memory store.
 
 ```rust,no_run
 use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, Handle, store::{InMemoryEventStore, JsonCodec},
+    Apply, ApplyProjection, DomainEvent, Handle, store::{inmemory, JsonCodec},
     Projection, Repository,
 };
 use serde::{Deserialize, Serialize};
@@ -151,7 +151,7 @@ impl ApplyProjection<FundsDeposited> for AccountBalance {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let account_id = "ACC-001".to_string();
