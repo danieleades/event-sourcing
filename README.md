@@ -240,3 +240,7 @@ contributions are welcome! Submit an issue or pull request if you spot something
 ## 📜 Licensing
 
 This project is publicly available under the **GNU General Public License v3.0**. It may optionally be distributed under the **MIT license by commercial arrangement.
+
+---
+
+*Was this useful? [Buy me a coffee](https://github.com/sponsors/danieleades/sponsorships?sponsor=danieleades&preview=true&frequency=recurring&amount=5)*
