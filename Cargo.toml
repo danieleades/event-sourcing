@@ -11,6 +11,7 @@ license = "GPL-3.0-only"
 edition = "2024"
 version = "0.1.0"
 rust-version = "1.88.0"
+homepage = "https://github.com/danieleades/sourcery"
 
 [workspace.lints.clippy]
 pedantic = "warn"
