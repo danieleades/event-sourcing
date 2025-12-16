@@ -6,10 +6,10 @@
 //!
 //! Run with: `cargo run --example optimistic_concurrency`
 
+use event_sourcing::repository::OptimisticCommandError;
+use event_sourcing::store::{JsonCodec, inmemory};
 use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{
-    Apply, DomainEvent, Handle, InMemoryEventStore, JsonCodec, OptimisticCommandError, Repository,
-};
+use event_sourcing::{Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -108,7 +108,7 @@ impl Handle<RestockItem> for InventoryItem {
 // Example Parts
 // =============================================================================
 
-type OptimisticRepo = Repository<InMemoryEventStore<String, JsonCodec, ()>>;
+type OptimisticRepo = Repository<inmemory::Store<String, JsonCodec, ()>>;
 
 /// Part 1: Basic optimistic concurrency usage.
 ///
@@ -116,7 +116,7 @@ type OptimisticRepo = Repository<InMemoryEventStore<String, JsonCodec, ()>>;
 async fn part1_basic_usage() -> Result<(OptimisticRepo, String), Box<dyn std::error::Error>> {
     println!("PART 1: Basic optimistic concurrency usage\n");
 
-    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store); // Optimistic concurrency is the default
 
     let item_id = "SKU-001".to_string();
@@ -188,7 +188,7 @@ async fn part3_retry_pattern() -> Result<(OptimisticRepo, String), Box<dyn std::
     println!("PART 3: Retry pattern for handling conflicts\n");
 
     // Create a fresh store to demonstrate retry more clearly
-    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
     let mut repo = Repository::new(store); // Optimistic concurrency is the default
     let item_id = "SKU-002".to_string();
 

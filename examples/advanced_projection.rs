@@ -12,10 +12,9 @@
 use std::collections::HashMap;
 
 use event_sourcing::Aggregate;
+use event_sourcing::store::{JsonCodec, inmemory};
 use event_sourcing::test::RepositoryTestExt;
-use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, InMemoryEventStore, JsonCodec, Projection, Repository,
-};
+use event_sourcing::{Apply, ApplyProjection, DomainEvent, Projection, Repository};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -157,7 +156,7 @@ impl ApplyProjection<PromotionApplied> for ProductSummary {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let product_id = String::from("SKU-007");

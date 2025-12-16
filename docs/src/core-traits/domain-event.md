@@ -28,34 +28,13 @@ impl DomainEvent for OrderPlaced {
 
 ## Why First-Class Structs?
 
-Many event-sourcing libraries define events directly as enum variants:
+This crate keeps events as separate structs rather than enum variants. Benefits:
 
-```rust,ignore
-// Other libraries
-enum OrderEvent {
-    Placed { product_id: String, quantity: u32 },
-    Shipped { tracking_number: String },
-}
-```
+- **Reuse** — Same event type in multiple aggregates
+- **Decoupling** — Projections subscribe to event types, not aggregate enums
+- **Smaller scope** — Import individual event structs
 
-This crate keeps events as separate structs:
-
-```rust,ignore
-// This crate
-struct OrderPlaced { product_id: String, quantity: u32 }
-struct OrderShipped { tracking_number: String }
-```
-
-Benefits:
-
-| Approach | Struct-based (this crate) | Enum-based |
-|----------|--------------------------|------------|
-| **Reuse across aggregates** | Same event type in multiple aggregates | Must duplicate or share enum |
-| **Cross-context sharing** | Import the struct | Import entire enum |
-| **Projection decoupling** | Subscribe to specific event types | Must know about aggregate's enum |
-| **Compile-time overhead** | Smaller per-aggregate | All variants compiled together |
-
-The derive macro generates the enum internally—you get the best of both worlds.
+The derive macro generates the aggregate's event enum internally—you get the best of both worlds.
 
 ## Naming Conventions
 
@@ -80,46 +59,9 @@ The `KIND` is stored in the event log and used for deserialization, so it must n
 
 ## Event Design Guidelines
 
-1. **Include all necessary data** — Events should be self-describing
-
-   ```rust,ignore
-   // Good: includes price at time of order
-   struct OrderPlaced {
-       product_id: String,
-       quantity: u32,
-       unit_price: i64,  // Captured at order time
-   }
-
-   // Bad: requires lookup to know price
-   struct OrderPlaced {
-       product_id: String,
-       quantity: u32,
-   }
-   ```
-
-2. **Avoid IDs when possible** — Aggregate IDs travel in the envelope
-
-   ```rust,ignore
-   // Good: ID is in envelope
-   struct FundsDeposited { amount: i64 }
-
-   // Avoid: redundant ID in payload
-   struct FundsDeposited { account_id: String, amount: i64 }
-   ```
-
-3. **Keep events small** — One fact per event
-
-   ```rust,ignore
-   // Good: separate events
-   struct AddressChanged { new_address: Address }
-   struct PhoneChanged { new_phone: String }
-
-   // Avoid: combined event
-   struct ContactInfoChanged {
-       new_address: Option<Address>,
-       new_phone: Option<String>,
-   }
-   ```
+1. **Include all necessary data** — Capture values at event time (e.g., price when ordered)
+2. **Avoid aggregate IDs** — They travel in the envelope, not the event payload
+3. **Keep events small** — One fact per event (prefer `AddressChanged` + `PhoneChanged` over `ContactInfoChanged`)
 
 ## Next
 

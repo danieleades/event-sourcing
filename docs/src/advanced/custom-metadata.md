@@ -24,10 +24,10 @@ pub struct EventMetadata {
 Configure your store with the metadata type:
 
 ```rust,ignore
-use event_sourcing::{InMemoryEventStore, JsonCodec};
+use event_sourcing::store::{inmemory, JsonCodec};
 
-let store: InMemoryEventStore<String, JsonCodec, EventMetadata> =
-    InMemoryEventStore::new(JsonCodec);
+let store: inmemory::Store<String, JsonCodec, EventMetadata> =
+    inmemory::Store::new(JsonCodec);
 ```
 
 ## Passing Metadata to Commands
@@ -126,7 +126,7 @@ let follow_up_metadata = EventMetadata {
 If you don't need metadata, use `()`:
 
 ```rust,ignore
-let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
 
 repository
     .execute_command::<Account, Deposit>(&id, &cmd, &())

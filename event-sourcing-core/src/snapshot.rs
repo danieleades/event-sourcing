@@ -37,15 +37,15 @@ pub struct Snapshot<Pos> {
 /// Trait for snapshot persistence with built-in policy.
 ///
 /// Implementations decide both *how* to store snapshots and *when* to store them.
-/// The repository calls [`should_snapshot`](SnapshotStore::should_snapshot) after
-/// each successful command execution to decide whether to serialize and persist
-/// a new snapshot.
+/// The repository calls [`offer_snapshot`](SnapshotStore::offer_snapshot) after each successful
+/// command execution to decide whether to create and persist a new snapshot.
 ///
 /// # Example Implementations
 ///
 /// - Always save: useful for aggregates with expensive replay
 /// - Every N events: balance between storage and replay cost
 /// - Never save: read-only replicas that only load snapshots created elsewhere
+// ANCHOR: snapshot_store_trait
 pub trait SnapshotStore: Send + Sync {
     /// Aggregate identifier type.
     ///
@@ -73,39 +73,55 @@ pub trait SnapshotStore: Send + Sync {
         aggregate_id: &'a Self::Id,
     ) -> impl Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>> + Send + 'a;
 
-    /// Whether a snapshot should be taken.
+    /// Whether to store a snapshot, with lazy snapshot creation.
     ///
-    /// The repository calls this before serializing aggregate state, so snapshot
-    /// stores can avoid unnecessary serialization cost when a policy declines.
-    #[must_use]
-    fn should_snapshot(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-        events_since_last_snapshot: u64,
-    ) -> bool;
-
-    /// Persist a snapshot.
+    /// The repository calls this after successfully appending new events, passing
+    /// `events_since_last_snapshot` and a `create_snapshot` callback. Implementations
+    /// may decline without invoking `create_snapshot`, avoiding unnecessary snapshot
+    /// creation cost (serialization, extra I/O, etc.).
     ///
-    /// Called after [`should_snapshot`](SnapshotStore::should_snapshot) returned `true`.
-    ///
-    /// # Arguments
-    ///
-    /// * `aggregate_kind` - The aggregate type identifier
-    /// * `aggregate_id` - The aggregate instance identifier
-    /// * `snapshot` - The snapshot to potentially store
-    /// * `events_since_last_snapshot` - Number of events replayed since the last snapshot
+    /// Returning [`SnapshotOffer::Stored`] indicates that the snapshot was persisted.
+    /// Returning [`SnapshotOffer::Declined`] indicates that no snapshot was stored.
     ///
     /// # Errors
     ///
-    /// Returns an error if persistence fails.
-    fn offer_snapshot<'a>(
+    /// Returns [`OfferSnapshotError::Create`] if `create_snapshot` fails.
+    /// Returns [`OfferSnapshotError::Snapshot`] if persistence fails.
+    fn offer_snapshot<'a, CE, Create>(
         &'a mut self,
         aggregate_kind: &'a str,
         aggregate_id: &'a Self::Id,
-        snapshot: Snapshot<Self::Position>,
         events_since_last_snapshot: u64,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
+        create_snapshot: Create,
+    ) -> impl Future<Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>> + Send + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a;
+}
+// ANCHOR_END: snapshot_store_trait
+
+/// Result of offering a snapshot to a store.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SnapshotOffer {
+    /// The snapshot store declined to store a snapshot.
+    Declined,
+    /// The snapshot store stored the snapshot.
+    Stored,
+}
+
+/// Error returned by [`SnapshotStore::offer_snapshot`].
+#[derive(Debug, thiserror::Error)]
+pub enum OfferSnapshotError<SnapshotError, CreateError>
+where
+    SnapshotError: std::error::Error + 'static,
+    CreateError: std::error::Error + 'static,
+{
+    /// Snapshot creation failed (e.g., serialization, extra I/O, etc.).
+    #[error("failed to create snapshot: {0}")]
+    Create(#[source] CreateError),
+    /// Snapshot persistence failed.
+    #[error("snapshot operation failed: {0}")]
+    Snapshot(#[source] SnapshotError),
 }
 
 /// No-op snapshot store for backwards compatibility.
@@ -145,23 +161,18 @@ where
         std::future::ready(Ok(None))
     }
 
-    fn offer_snapshot<'a>(
+    fn offer_snapshot<'a, CE, Create>(
         &'a mut self,
         _aggregate_kind: &'a str,
         _aggregate_id: &'a Self::Id,
-        _snapshot: Snapshot<Pos>,
         _events_since_last_snapshot: u64,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
-        std::future::ready(Ok(()))
-    }
-
-    fn should_snapshot(
-        &self,
-        _aggregate_kind: &str,
-        _aggregate_id: &Self::Id,
-        _events_since_last_snapshot: u64,
-    ) -> bool {
-        false
+        _create_snapshot: Create,
+    ) -> impl Future<Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>> + Send + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Pos>, CE> + 'a,
+    {
+        std::future::ready(Ok(SnapshotOffer::Declined))
     }
 }
 
@@ -306,31 +317,30 @@ where
         std::future::ready(Ok(snapshot))
     }
 
-    fn should_snapshot(
-        &self,
-        _aggregate_kind: &str,
-        _aggregate_id: &Self::Id,
-        events_since_last_snapshot: u64,
-    ) -> bool {
-        self.policy.should_snapshot(events_since_last_snapshot)
-    }
-
-    #[tracing::instrument(skip(self, aggregate_id, snapshot))]
-    fn offer_snapshot<'a>(
+    #[tracing::instrument(skip(self, aggregate_id, create_snapshot))]
+    fn offer_snapshot<'a, CE, Create>(
         &'a mut self,
         aggregate_kind: &'a str,
         aggregate_id: &'a Self::Id,
-        snapshot: Snapshot<Pos>,
         events_since_last_snapshot: u64,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
-        debug_assert!(
-            self.policy.should_snapshot(events_since_last_snapshot),
-            "offer_snapshot called when policy declined"
-        );
+        create_snapshot: Create,
+    ) -> impl Future<Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>> + Send + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Pos>, CE> + 'a,
+    {
+        if !self.policy.should_snapshot(events_since_last_snapshot) {
+            return std::future::ready(Ok(SnapshotOffer::Declined));
+        }
+
+        let snapshot = match create_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(e) => return std::future::ready(Err(OfferSnapshotError::Create(e))),
+        };
 
         let key = StreamKey::new(aggregate_kind, aggregate_id.clone());
         self.snapshots.insert(key, snapshot);
         tracing::debug!(events_since_last_snapshot, "snapshot saved");
-        std::future::ready(Ok(()))
+        std::future::ready(Ok(SnapshotOffer::Stored))
     }
 }

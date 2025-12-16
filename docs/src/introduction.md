@@ -20,8 +20,9 @@ It adds complexity, so consider simpler approaches for CRUD-heavy applications w
 | Core traits for aggregates, events, projections | Command bus / message broker |
 | Derive macro to reduce boilerplate | Outbox pattern |
 | Repository for command execution | Snapshot scheduler |
-| In-memory store for testing | Production database adapters |
-| Test framework (given-when-then) | Event streaming infrastructure |
+| In-memory store for testing | Event streaming infrastructure |
+| PostgreSQL store (optional) | |
+| Test framework (given-when-then) | |
 
 The crate is intentionally minimal. You wire the repository into whichever pipeline you prefer—whether that's a web framework, actor system, or CLI tool.
 

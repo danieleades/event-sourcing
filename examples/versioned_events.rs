@@ -17,10 +17,9 @@
 //! Run with: `cargo run --example versioned_events`
 
 use event_sourcing::codec::ProjectionEvent;
-use event_sourcing::store::{EventFilter, EventStore};
-use event_sourcing::{
-    Aggregate, Apply, DomainEvent, Handle, InMemoryEventStore, JsonCodec, Repository,
-};
+use event_sourcing::store::EventStore;
+use event_sourcing::store::{EventFilter, JsonCodec, inmemory};
+use event_sourcing::{Aggregate, Apply, DomainEvent, Handle, Repository};
 use serde::{Deserialize, Serialize};
 use serde_evolve::Versioned;
 
@@ -355,8 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Versioned Events with Event Sourcing ===\n");
 
     // Use OrderMetadata (versioned) as the metadata type for the store
-    let store: InMemoryEventStore<String, JsonCodec, OrderMetadata> =
-        InMemoryEventStore::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, OrderMetadata> = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     // ========================================

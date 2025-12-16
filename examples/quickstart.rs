@@ -6,8 +6,8 @@
 
 // ANCHOR: full_example
 use event_sourcing::{
-    Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec, Projection,
-    Repository,
+    Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
+    store::{JsonCodec, inmemory},
 };
 use serde::{Deserialize, Serialize};
 
@@ -74,7 +74,7 @@ impl ApplyProjection<FundsDeposited> for TotalDeposits {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an in-memory store
-    let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+    let store = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     // Execute a command

@@ -61,10 +61,11 @@ use std::marker::PhantomData;
 
 use thiserror::Error;
 
+use crate::aggregate::{Aggregate, Handle};
 use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyStrategy, Unchecked};
+use crate::repository::Repository;
 use crate::store::{AppendError, EventStore, PersistableEvent};
-use crate::{Aggregate, Handle, Repository, SnapshotRepository};
 
 // =============================================================================
 // Repository Test Extension Trait
@@ -120,26 +121,9 @@ pub trait StoreAccess {
     fn store_mut(&mut self) -> &mut Self::Store;
 }
 
-impl<S, C> StoreAccess for Repository<S, C>
+impl<S, C, M> StoreAccess for Repository<S, C, M>
 where
     S: EventStore,
-    C: ConcurrencyStrategy,
-{
-    type Store = S;
-
-    fn store(&self) -> &Self::Store {
-        &self.store
-    }
-
-    fn store_mut(&mut self) -> &mut Self::Store {
-        &mut self.store
-    }
-}
-
-impl<S, SS, C> StoreAccess for SnapshotRepository<S, SS, C>
-where
-    S: EventStore,
-    SS: crate::snapshot::SnapshotStore<Id = S::Id, Position = S::Position>,
     C: ConcurrencyStrategy,
 {
     type Store = S;
@@ -643,15 +627,39 @@ mod tests {
     fn default_creates_new_framework() {
         let _framework: TestFramework<Counter> = TestFramework::default();
     }
+
+    struct NoOp;
+
+    impl Handle<NoOp> for Counter {
+        fn handle(&self, _: &NoOp) -> Result<Vec<Self::Event>, Self::Error> {
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn no_op_command_produces_no_events() {
+        CounterTest::new()
+            .given_no_previous_events()
+            .when(&NoOp)
+            .then_expect_no_events();
+    }
+
+    #[test]
+    fn then_expect_error_eq_matches_error_value() {
+        CounterTest::new()
+            .given_no_previous_events()
+            .when(&AddValue { amount: -5 })
+            .then_expect_error_eq(&"amount must be positive".to_string());
+    }
 }
 
 #[cfg(test)]
 mod repository_test_ext_tests {
     use super::*;
     use crate::{
-        DomainEvent, InMemoryEventStore, JsonCodec,
         codec::{EventDecodeError, ProjectionEvent},
-        store::PersistableEvent,
+        event::DomainEvent,
+        store::{JsonCodec, PersistableEvent, inmemory},
     };
 
     // Test fixtures with SerializableEvent implementation
@@ -731,7 +739,7 @@ mod repository_test_ext_tests {
 
     #[tokio::test]
     async fn seed_events_appends_typed_events() {
-        let store: InMemoryEventStore<String, JsonCodec, ()> = InMemoryEventStore::new(JsonCodec);
+        let store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let mut repo = Repository::new(store);
         let id = "s1".to_string();
 
@@ -757,8 +765,7 @@ mod repository_test_ext_tests {
 
     #[tokio::test]
     async fn inject_concurrent_event_appends_single_event() {
-        let event_store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let event_store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let mut repo = Repository::new(event_store);
         let id = "s1".to_string();
 
@@ -784,8 +791,7 @@ mod repository_test_ext_tests {
 
     #[tokio::test]
     async fn inject_raw_event_appends_raw_bytes() {
-        let event_store: InMemoryEventStore<String, JsonCodec, ()> =
-            InMemoryEventStore::new(JsonCodec);
+        let event_store: inmemory::Store<String, JsonCodec, ()> = inmemory::Store::new(JsonCodec);
         let mut repo = Repository::new(event_store);
 
         // Inject raw event with pre-serialized data

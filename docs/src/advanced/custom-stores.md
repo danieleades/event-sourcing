@@ -1,54 +1,11 @@
 # Custom Stores
 
-The `InMemoryEventStore` is useful for testing, but production systems need durable storage. This guide walks through implementing `EventStore` for your database.
+The `inmemory::Store` is useful for testing, but production systems need durable storage. This guide walks through implementing `EventStore` for your database.
 
 ## The EventStore Trait
 
 ```rust,ignore
-pub trait EventStore {
-    type Id: Clone;
-    type Position: Copy + PartialEq + std::fmt::Debug;
-    type Error: std::error::Error;
-    type Codec: Codec;
-    type Metadata;
-
-    fn codec(&self) -> &Self::Codec;
-
-    fn stream_version(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Self::Position>, Self::Error>;
-
-    fn begin<C: ConcurrencyStrategy>(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: Self::Id,
-        expected_version: Option<Self::Position>,
-    ) -> Transaction<'_, Self, C>
-    where
-        Self: Sized;
-
-    fn append(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-        expected_version: Option<Self::Position>,
-        events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<Self::Position, Self::Error>>;
-
-    fn load_events(
-        &self,
-        filters: &[EventFilter<Self::Id, Self::Position>],
-    ) -> Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error>;
-
-    fn append_expecting_new(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-        events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> Result<(), AppendError<Self::Position, Self::Error>>;
-}
+{{#include ../../../event-sourcing-core/src/store.rs:event_store_trait}}
 ```
 
 ## Design Decisions
@@ -89,12 +46,11 @@ CREATE INDEX idx_events_kind
 ## Implementation Skeleton
 
 ```rust,ignore
-use event_sourcing::JsonCodec;
-use event_sourcing::codec::Codec;
+use std::future::Future;
 use event_sourcing::store::{
-    AppendError, EventFilter, EventStore, PersistableEvent, StoredEvent, Transaction,
+    AppendError, EventFilter, EventStore, JsonCodec, PersistableEvent, StoredEvent, Transaction,
 };
-use event_sourcing::ConcurrencyStrategy;
+use event_sourcing::concurrency::ConcurrencyStrategy;
 
 pub struct PostgresEventStore {
     pool: sqlx::PgPool,
@@ -108,75 +64,36 @@ impl EventStore for PostgresEventStore {
     type Codec = JsonCodec;
     type Metadata = serde_json::Value;
 
-    fn codec(&self) -> &Self::Codec {
-        &self.codec
-    }
+    fn codec(&self) -> &Self::Codec { &self.codec }
 
-    fn stream_version<'a>(
-        &'a self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-    ) -> impl std::future::Future<Output = Result<Option<Self::Position>, Self::Error>>
-           + Send
-           + 'a {
-        // Query latest stream position/version for (aggregate_kind, aggregate_id)
-        async move { todo!() }
-    }
-
-    fn begin<C: ConcurrencyStrategy>(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: Self::Id,
-        expected_version: Option<Self::Position>,
-    ) -> Transaction<'_, Self, C>
-    where
-        Self: Sized,
+    fn stream_version<'a>(&'a self, aggregate_kind: &'a str, aggregate_id: &'a Self::Id)
+        -> impl Future<Output = Result<Option<Self::Position>, Self::Error>> + Send + 'a
     {
-        // The library-provided Transaction is a buffer. Your atomicity and
-        // version checking happens in `append` / `append_expecting_new`.
+        async move { todo!("SELECT MAX(position) WHERE aggregate_kind = $1 AND aggregate_id = $2") }
+    }
+
+    fn begin<C: ConcurrencyStrategy>(&mut self, aggregate_kind: &str, aggregate_id: Self::Id, expected_version: Option<Self::Position>)
+        -> Transaction<'_, Self, C>
+    {
         Transaction::new(self, aggregate_kind.to_string(), aggregate_id, expected_version)
     }
 
-    fn append<'a>(
-        &'a mut self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-        expected_version: Option<Self::Position>,
-        events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> impl std::future::Future<
-        Output = Result<(), AppendError<Self::Position, Self::Error>>,
-    > + Send
-           + 'a {
-        // Start a DB transaction
-        // If expected_version is Some(v), enforce it (unique constraint / SELECT FOR UPDATE)
-        // Insert events atomically
-        // Map version mismatches to AppendError::Conflict
-        async move { todo!() }
+    fn append<'a>(&'a mut self, aggregate_kind: &'a str, aggregate_id: &'a Self::Id, expected_version: Option<Self::Position>, events: Vec<PersistableEvent<Self::Metadata>>)
+        -> impl Future<Output = Result<(), AppendError<Self::Position, Self::Error>>> + Send + 'a
+    {
+        async move { todo!("INSERT with version check") }
     }
 
-    fn append_expecting_new<'a>(
-        &'a mut self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-        events: Vec<PersistableEvent<Self::Metadata>>,
-    ) -> impl std::future::Future<
-        Output = Result<(), AppendError<Self::Position, Self::Error>>,
-    > + Send
-           + 'a {
-        // Enforce that the stream has no events, then insert atomically.
-        async move { todo!() }
+    fn append_expecting_new<'a>(&'a mut self, aggregate_kind: &'a str, aggregate_id: &'a Self::Id, events: Vec<PersistableEvent<Self::Metadata>>)
+        -> impl Future<Output = Result<(), AppendError<Self::Position, Self::Error>>> + Send + 'a
+    {
+        async move { todo!("INSERT only if stream empty") }
     }
 
-    fn load_events<'a>(
-        &'a self,
-        filters: &'a [EventFilter<Self::Id, Self::Position>],
-    ) -> impl std::future::Future<
-        Output = Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error>,
-    > + Send
-           + 'a {
-        // Build query from filters
-        // Execute and map rows to StoredEvent
-        async move { todo!() }
+    fn load_events<'a>(&'a self, filters: &'a [EventFilter<Self::Id, Self::Position>])
+        -> impl Future<Output = Result<Vec<StoredEvent<Self::Id, Self::Position, Self::Metadata>>, Self::Error>> + Send + 'a
+    {
+        async move { todo!("SELECT with filters") }
     }
 }
 ```
@@ -285,7 +202,7 @@ s3://bucket/events-by-kind/{event_kind}/{position}.json  (symlinks/copies)
 
 ## Testing Your Store
 
-Use the same test patterns as `InMemoryEventStore`:
+Use the same test patterns as `inmemory::Store`:
 
 ```rust,ignore
 #[tokio::test]

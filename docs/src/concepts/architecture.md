@@ -14,13 +14,12 @@ App: "Your Application" {
 
 Crate: "event-sourcing crate" {
   Repository
-  SnapshotRepository
   EventStore {shape: cylinder}
   SnapshotStore {shape: cylinder}
   Codec
 
   Repository -> EventStore
-  SnapshotRepository -> SnapshotStore: {style.stroke-dash: 3}
+  Repository -> SnapshotStore: {style.stroke-dash: 3}
   EventStore -> Codec
 }
 
@@ -65,7 +64,7 @@ This keeps domain logic free of infrastructure concerns.
 shape: sequence_diagram
 
 App: Application
-Repo: SnapshotRepository
+Repo: Repository (snapshots enabled)
 Store: EventStore
 Agg: Aggregate
 Snap: SnapshotStore
@@ -119,7 +118,7 @@ Projections specify which events they care about. The repository loads only thos
 | Type | Role |
 |------|------|
 | `Repository<S>` | Orchestrates aggregates and projections (no snapshots) |
-| `SnapshotRepository<S, SS>` | Snapshot-enabled repository orchestration |
+| `Repository<S, C, Snapshots<SS>>` | Snapshot-enabled repository orchestration |
 | `EventStore` | Trait for event persistence |
 | `SnapshotStore` | Trait for aggregate snapshots |
 | `Codec` | Trait for serialization/deserialization |

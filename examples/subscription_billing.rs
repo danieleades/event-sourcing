@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use event_sourcing::{
-    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, InMemoryEventStore, JsonCodec,
-    Projection, Repository,
+    Aggregate, Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
+    store::{JsonCodec, inmemory},
 };
 use serde::{Deserialize, Serialize};
 
@@ -442,8 +442,7 @@ impl ApplyProjection<InvoiceSettled> for CustomerBillingProjection {
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let store: InMemoryEventStore<String, JsonCodec, EventMetadata> =
-        InMemoryEventStore::new(JsonCodec);
+    let store: inmemory::Store<String, JsonCodec, EventMetadata> = inmemory::Store::new(JsonCodec);
     let mut repository = Repository::new(store);
 
     let customer_id = String::from("ACME-001");

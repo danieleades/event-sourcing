@@ -5,7 +5,7 @@ Projections are read models built by replaying events. They're optimized for que
 ## The `Projection` Trait
 
 ```rust,ignore
-{{#include ../../../src/projection.rs:projection_trait}}
+{{#include ../../../event-sourcing-core/src/projection.rs:projection_trait}}
 ```
 
 Projections must be `Default` because they start empty and build up through event replay.
@@ -13,7 +13,7 @@ Projections must be `Default` because they start empty and build up through even
 ## The `ApplyProjection<E>` Trait
 
 ```rust,ignore
-{{#include ../../../src/projection.rs:apply_projection_trait}}
+{{#include ../../../event-sourcing-core/src/projection.rs:apply_projection_trait}}
 ```
 
 Unlike aggregate `Apply`, projections receive:
@@ -63,68 +63,18 @@ let summary = repository
 
 ## Multi-Aggregate Projections
 
-Projections can consume events from multiple aggregate types:
-
-```d2
-direction: right
-
-Events: {
-  ProductCreated
-  ProductRenamed
-  SaleRecorded
-}
-
-Projection: {
-  Inventory Report
-}
-
-Events.ProductCreated -> Projection.Inventory Report
-Events.ProductRenamed -> Projection.Inventory Report
-Events.SaleRecorded -> Projection.Inventory Report
-```
-
-```rust,ignore
-#[derive(Debug, Default)]
-pub struct InventoryReport {
-    pub products: HashMap<String, ProductInfo>,
-    pub total_sales: i64,
-}
-
-impl Projection for InventoryReport {
-    type Id = String;
-    type Metadata = ();
-}
-
-impl ApplyProjection<ProductCreated> for InventoryReport {
-    fn apply_projection(&mut self, id: &Self::Id, event: &ProductCreated, _: &Self::Metadata) {
-        self.products.insert(id.clone(), ProductInfo {
-            name: event.name.clone(),
-            sales_count: 0,
-        });
-    }
-}
-
-impl ApplyProjection<SaleRecorded> for InventoryReport {
-    fn apply_projection(&mut self, _id: &Self::Id, event: &SaleRecorded, _: &Self::Metadata) {
-        if let Some(product) = self.products.get_mut(&event.product_id) {
-            product.sales_count += event.quantity;
-        }
-        self.total_sales += event.total;
-    }
-}
-```
-
-Build by registering events from different aggregates:
+Projections can consume events from multiple aggregate types. Register each event type with `.event::<E>()`:
 
 ```rust,ignore
 let report = repository
     .build_projection::<InventoryReport>()
     .event::<ProductCreated>()   // From Product aggregate
-    .event::<ProductRenamed>()   // From Product aggregate
     .event::<SaleRecorded>()     // From Sale aggregate
     .load()
     .await?;
 ```
+
+Implement `ApplyProjection<E>` for each event type the projection handles.
 
 ## Filtering by Aggregate
 

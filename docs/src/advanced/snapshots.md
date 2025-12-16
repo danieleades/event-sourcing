@@ -29,9 +29,9 @@ Instead of replaying 1050 events, you load the snapshot and replay only 50.
 Use `with_snapshots()` when creating the repository:
 
 ```rust,ignore
-use event_sourcing::{InMemoryEventStore, InMemorySnapshotStore, JsonCodec, Repository};
+use event_sourcing::{Repository, snapshot::InMemorySnapshotStore, store::{inmemory, JsonCodec}};
 
-let event_store = InMemoryEventStore::new(JsonCodec);
+let event_store = inmemory::Store::new(JsonCodec);
 let snapshot_store = InMemorySnapshotStore::always();
 
 let mut repository = Repository::new(event_store)
@@ -75,38 +75,10 @@ Use for: Read-only replicas, debugging.
 ## The `SnapshotStore` Trait
 
 ```rust,ignore
-pub trait SnapshotStore: Send + Sync {
-    type Id: Send + Sync + 'static;
-    type Position: Send + Sync + 'static;
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    fn load<'a>(
-        &'a self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-    ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
-           + Send
-           + 'a;
-
-    fn should_snapshot(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-        events_since_last_snapshot: u64,
-    ) -> bool;
-
-    fn offer_snapshot<'a>(
-        &'a mut self,
-        aggregate_kind: &'a str,
-        aggregate_id: &'a Self::Id,
-        snapshot: Snapshot<Self::Position>,
-        events_since_last_snapshot: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'a;
-}
+{{#include ../../../event-sourcing-core/src/snapshot.rs:snapshot_store_trait}}
 ```
 
-The repository calls `should_snapshot` before serializing aggregate state, so snapshot stores can
-avoid unnecessary snapshot encoding work when a policy declines.
+The repository calls `offer_snapshot` after successfully appending new events. Implementations may decline without invoking `create_snapshot`, avoiding unnecessary snapshot encoding work.
 
 ## The `Snapshot` Type
 
@@ -130,44 +102,7 @@ The `data` is the serialized aggregate state encoded using the repository's even
 
 ## Implementing a Custom Store
 
-For production, implement `SnapshotStore` with your database:
-
-```rust,ignore
-impl SnapshotStore for PostgresSnapshotStore {
-    type Error = sqlx::Error;
-    type Id = String;
-    type Position = u64;
-
-    fn load<'a>(
-        &'a self,
-        kind: &'a str,
-        id: &'a String,
-    ) -> impl std::future::Future<Output = Result<Option<Snapshot<u64>>, Self::Error>>
-           + Send
-           + 'a {
-        // SELECT aggregate_data, position
-        // FROM snapshots
-        // WHERE aggregate_kind = $1 AND aggregate_id = $2
-        async move { todo!() }
-    }
-
-    fn should_snapshot(&self, _kind: &str, _id: &String, events_since: u64) -> bool {
-        events_since >= 100
-    }
-
-    fn offer_snapshot<'a>(
-        &'a mut self,
-        kind: &'a str,
-        id: &'a String,
-        snapshot: Snapshot<u64>,
-        events_since: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'a {
-        debug_assert!(self.should_snapshot(kind, id, events_since));
-        // INSERT INTO snapshots (kind, id, position, data) VALUES (...)
-        async move { Ok(()) }
-    }
-}
-```
+For production, implement `SnapshotStore` with your database. See [Custom Stores](custom-stores.md) for a complete guide.
 
 ## Snapshot Invalidation
 

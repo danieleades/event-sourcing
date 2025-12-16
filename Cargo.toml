@@ -1,7 +1,9 @@
 [workspace]
 members = [
     ".",
+    "event-sourcing-core",
     "event-sourcing-macros",
+    "event-sourcing-postgres",
 ]
 
 [workspace.package]
@@ -26,19 +28,22 @@ workspace = true
 
 [features]
 default = []
-test-util = []
+test-util = ["event-sourcing-core/test-util"]
+postgres = ["dep:event-sourcing-postgres"]
 
 [dependencies]
+event-sourcing-core = { path = "event-sourcing-core" }
 event-sourcing-macros = { path = "event-sourcing-macros" }
-serde = { version = "1", default-features = false, features = ["derive", "std"] }
-serde_json = { version = "1", default-features = false, features = ["std"] }
-thiserror = { version = "2", default-features = false, features = ["std"] }
-tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
+event-sourcing-postgres = { path = "event-sourcing-postgres", optional = true }
 
 [dev-dependencies]
 anyhow = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
 serde-evolve = "0.1.0"
+thiserror = { version = "2", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
+tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
 
 [[example]]
 name = "advanced_projection"
