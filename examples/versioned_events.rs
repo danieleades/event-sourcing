@@ -6,8 +6,10 @@
 //! This example shows:
 //! - **Versioned domain events**: Events that evolve through multiple versions
 //! - **Versioned metadata**: Infrastructure metadata that changes over time
-//! - **Transparent migration**: Old events automatically migrate to current schema
-//! - **Event replay**: Historical events from different versions replaying correctly
+//! - **Transparent migration**: Old events automatically migrate to current
+//!   schema
+//! - **Event replay**: Historical events from different versions replaying
+//!   correctly
 //!
 //! Real-world scenario: An order management system where:
 //! - V1: Basic orders (product + quantity)
@@ -18,10 +20,11 @@
 
 use serde::{Deserialize, Serialize};
 use serde_evolve::Versioned;
-use sourcery::codec::ProjectionEvent;
-use sourcery::store::EventStore;
-use sourcery::store::{EventFilter, JsonCodec, inmemory};
-use sourcery::{Aggregate, Apply, DomainEvent, Handle, Repository};
+use sourcery::{
+    Aggregate, Apply, DomainEvent, Handle, Repository,
+    codec::ProjectionEvent,
+    store::{EventFilter, EventStore, JsonCodec, inmemory},
+};
 
 // =============================================================================
 // Versioned Domain Event - OrderPlaced
@@ -49,8 +52,9 @@ pub struct OrderPlaced {
 /// This module contains the wire format DTOs for each version. The versioned
 /// crate automatically migrates from V1 → V2 → V3 → `OrderPlaced`.
 mod order_placed_versions {
-    use super::OrderPlaced;
     use serde::{Deserialize, Serialize};
+
+    use super::OrderPlaced;
 
     /// V1: Original event schema - just product and quantity
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -151,8 +155,9 @@ pub struct OrderMetadata {
 }
 
 mod metadata_versions {
-    use super::OrderMetadata;
     use serde::{Deserialize, Serialize};
+
+    use super::OrderMetadata;
 
     /// V1: Basic metadata
     #[derive(Clone, Debug, Serialize, Deserialize)]

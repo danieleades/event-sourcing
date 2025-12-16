@@ -1,7 +1,8 @@
 //! Compile-time concurrency strategy selection.
 //!
-//! This module provides marker types for choosing between optimistic (version-checked)
-//! and unchecked (last-writer-wins) concurrency control at the type level.
+//! This module provides marker types for choosing between optimistic
+//! (version-checked) and unchecked (last-writer-wins) concurrency control at
+//! the type level.
 //!
 //! # Example
 //!
@@ -27,11 +28,11 @@ pub struct Unchecked;
 
 /// Optimistic concurrency control - version checked on every write.
 ///
-/// This is the default concurrency strategy for [`Repository`](crate::Repository).
-/// With this strategy, the repository tracks the stream version when loading
-/// an aggregate and verifies it hasn't changed before appending new events.
-/// If the version changed (another writer appended events), the operation
-/// fails with a [`ConcurrencyConflict`] error.
+/// This is the default concurrency strategy for
+/// [`Repository`](crate::Repository). With this strategy, the repository tracks
+/// the stream version when loading an aggregate and verifies it hasn't changed
+/// before appending new events. If the version changed (another writer appended
+/// events), the operation fails with a [`ConcurrencyConflict`] error.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Optimistic;
 
@@ -69,7 +70,8 @@ pub struct ConcurrencyConflict<Pos: fmt::Debug> {
     /// `None` indicates we expected a new/empty stream.
     pub expected: Option<Pos>,
     /// The actual current version in the store.
-    /// `None` indicates the stream is empty (which shouldn't happen in a conflict).
+    /// `None` indicates the stream is empty (which shouldn't happen in a
+    /// conflict).
     pub actual: Option<Pos>,
 }
 
@@ -77,14 +79,14 @@ fn format_conflict<Pos: fmt::Debug>(expected: Option<&Pos>, actual: Option<&Pos>
     match (expected, actual) {
         (None, Some(actual)) => {
             format!(
-                "concurrency conflict: expected new stream, found version {actual:?} \
-                 (hint: another process created this aggregate; reload and retry)"
+                "concurrency conflict: expected new stream, found version {actual:?} (hint: \
+                 another process created this aggregate; reload and retry)"
             )
         }
         (Some(expected), actual) => {
             format!(
-                "concurrency conflict: expected version {expected:?}, found {actual:?} \
-                 (hint: stream was modified; reload and retry)"
+                "concurrency conflict: expected version {expected:?}, found {actual:?} (hint: \
+                 stream was modified; reload and retry)"
             )
         }
         (None, None) => "concurrency conflict: unexpected empty state".to_string(),

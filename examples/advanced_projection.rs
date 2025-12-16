@@ -12,10 +12,11 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use sourcery::Aggregate;
-use sourcery::store::{JsonCodec, inmemory};
-use sourcery::test::RepositoryTestExt;
-use sourcery::{Apply, ApplyProjection, DomainEvent, Projection, Repository};
+use sourcery::{
+    Aggregate, Apply, ApplyProjection, DomainEvent, Projection, Repository,
+    store::{JsonCodec, inmemory},
+    test::RepositoryTestExt,
+};
 
 // =============================================================================
 // Aggregates and domain events

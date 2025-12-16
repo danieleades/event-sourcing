@@ -4,20 +4,21 @@
 //! (`PersistableEvent`, `StoredEvent`), transactions, and a reference
 //! in-memory implementation. Filters and positions live here to keep storage
 //! concerns together.
-use std::future::Future;
-use std::marker::PhantomData;
+use std::{future::Future, marker::PhantomData};
 
 use thiserror::Error;
 
-use crate::codec::{Codec, SerializableEvent};
-use crate::concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked};
+use crate::{
+    codec::{Codec, SerializableEvent},
+    concurrency::{ConcurrencyConflict, ConcurrencyStrategy, Optimistic, Unchecked},
+};
 
 pub mod inmemory;
 
 /// Raw event data ready to be written to a store backend.
 ///
-/// This is the boundary between Repository and `EventStore`. Repository serializes
-/// events to this form, `EventStore` adds position and persistence.
+/// This is the boundary between Repository and `EventStore`. Repository
+/// serializes events to this form, `EventStore` adds position and persistence.
 ///
 /// Generic over metadata type `M` to support different metadata structures.
 #[derive(Clone)]
@@ -31,7 +32,8 @@ pub struct PersistableEvent<M> {
 ///
 /// Generic parameters:
 /// - `Id`: Aggregate identifier type
-/// - `Pos`: Position type for ordering (`()` for no ordering, `u64` for global sequence, etc.)
+/// - `Pos`: Position type for ordering (`()` for no ordering, `u64` for global
+///   sequence, etc.)
 /// - `M`: Metadata type (defaults to `EventMetadata`)
 #[derive(Clone)]
 pub struct StoredEvent<Id, Pos, M> {
@@ -120,9 +122,10 @@ impl<Pos: std::fmt::Debug, StoreError: std::error::Error> AppendError<Pos, Store
 
 /// Transaction for appending events to an aggregate instance.
 ///
-/// Events are accumulated in the transaction and persisted atomically when `commit()` is called.
-/// If the transaction is dropped without calling `commit()`, the events are silently discarded
-/// (rolled back). This allows errors during event serialization to be handled gracefully.
+/// Events are accumulated in the transaction and persisted atomically when
+/// `commit()` is called. If the transaction is dropped without calling
+/// `commit()`, the events are silently discarded (rolled back). This allows
+/// errors during event serialization to be handled gracefully.
 ///
 /// The `C` type parameter determines the concurrency strategy:
 /// - [`Unchecked`]: No version checking (default)
@@ -157,7 +160,8 @@ impl<'a, S: EventStore, C: ConcurrencyStrategy> Transaction<'a, S, C> {
 
     /// Append an event to the transaction.
     ///
-    /// For sum-type events (enums), this serializes each variant to its persistable form.
+    /// For sum-type events (enums), this serializes each variant to its
+    /// persistable form.
     ///
     /// # Errors
     ///
@@ -207,12 +211,12 @@ impl<S: EventStore> Transaction<'_, S, Unchecked> {
 impl<S: EventStore> Transaction<'_, S, Optimistic> {
     /// Commit the transaction with version checking.
     ///
-    /// The commit will fail with a [`ConcurrencyConflict`] if the stream version
-    /// has changed since the aggregate was loaded.
+    /// The commit will fail with a [`ConcurrencyConflict`] if the stream
+    /// version has changed since the aggregate was loaded.
     ///
     /// When `expected_version` is `None`, this means we expect a new aggregate
-    /// (empty stream). The commit will fail with a conflict if the stream already
-    /// has events.
+    /// (empty stream). The commit will fail with a conflict if the stream
+    /// already has events.
     ///
     /// # Errors
     ///
@@ -266,12 +270,15 @@ impl<S: EventStore, C: ConcurrencyStrategy> Drop for Transaction<'_, S, C> {
 
 /// Abstraction over the persistence layer for event streams.
 ///
-/// This trait supports both stream-based and type-partitioned storage implementations.
+/// This trait supports both stream-based and type-partitioned storage
+/// implementations.
 ///
 /// Associated types allow stores to customize their behavior:
 /// - `Id`: Aggregate identifier type
-/// - `Position`: Ordering strategy (`()` for stream-based, `u64` for global ordering)
-/// - `Metadata`: Infrastructure metadata type (timestamps, causation tracking, etc.)
+/// - `Position`: Ordering strategy (`()` for stream-based, `u64` for global
+///   ordering)
+/// - `Metadata`: Infrastructure metadata type (timestamps, causation tracking,
+///   etc.)
 /// - `Codec`: Serialization strategy for domain events
 // ANCHOR: event_store_trait
 pub trait EventStore: Send + Sync {
@@ -368,8 +375,9 @@ pub trait EventStore: Send + Sync {
 
     /// Append events expecting an empty stream.
     ///
-    /// This method is used by optimistic concurrency when creating new aggregates.
-    /// It fails with a [`ConcurrencyConflict`] if the stream already has events.
+    /// This method is used by optimistic concurrency when creating new
+    /// aggregates. It fails with a [`ConcurrencyConflict`] if the stream
+    /// already has events.
     ///
     /// # Errors
     ///
@@ -423,9 +431,8 @@ impl crate::codec::Codec for JsonCodec {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::inmemory;
-
     use super::*;
+    use crate::store::inmemory;
 
     #[test]
     fn event_filter_for_event_is_unrestricted() {

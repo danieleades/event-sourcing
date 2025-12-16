@@ -1,16 +1,20 @@
 #![doc = include_str!("../README.md")]
 
-pub use sourcery_core::{aggregate, codec, concurrency, projection, repository, snapshot};
-pub use sourcery_core::{
-    aggregate::Aggregate, aggregate::Apply, aggregate::Handle, event::DomainEvent,
-    projection::ApplyProjection, projection::Projection, repository::Repository,
-};
-
-// Re-export proc macro derives so consumers only depend on `sourcery`.
-pub use sourcery_macros::Aggregate;
-
 #[cfg(feature = "test-util")]
 pub use sourcery_core::test;
+pub use sourcery_core::{
+    aggregate,
+    aggregate::{Aggregate, Apply, Handle},
+    codec, concurrency,
+    event::DomainEvent,
+    projection,
+    projection::{ApplyProjection, Projection},
+    repository,
+    repository::Repository,
+    snapshot,
+};
+// Re-export proc macro derives so consumers only depend on `sourcery`.
+pub use sourcery_macros::Aggregate;
 
 pub mod store {
 

@@ -1,23 +1,30 @@
 //! Inventory Report Example - Pure Events with Composite IDs
 //!
-//! Demonstrates the event envelope pattern with pure domain events and composite aggregate IDs,
-//! using the `#[derive(Aggregate)]` macro and the manual `ProjectionBuilder` API.
+//! Demonstrates the event envelope pattern with pure domain events and
+//! composite aggregate IDs, using the `#[derive(Aggregate)]` macro and the
+//! manual `ProjectionBuilder` API.
 //! - **Product aggregate**: Manages inventory with simple string IDs (SKU)
-//! - **Sale aggregate**: Records sales with composite IDs (`SaleId { product_sku, sale_number }`)
-//! - **`InventoryReport` projection**: Correlates events across aggregates via envelope metadata
+//! - **Sale aggregate**: Records sales with composite IDs (`SaleId {
+//!   product_sku, sale_number }`)
+//! - **`InventoryReport` projection**: Correlates events across aggregates via
+//!   envelope metadata
 //!
 //! Key architectural points:
 //! - **Pure events**: Domain events contain no persistence metadata
-//! - **Composite IDs**: Sale aggregate IDs encode the product SKU in `aggregate_id`
-//! - **`ApplyProjection` + builder**: Projections access `aggregate_kind`, `aggregate_id`, and metadata
-//! - **External IDs**: Aggregates treat IDs as infrastructure metadata supplied by the repository
+//! - **Composite IDs**: Sale aggregate IDs encode the product SKU in
+//!   `aggregate_id`
+//! - **`ApplyProjection` + builder**: Projections access `aggregate_kind`,
+//!   `aggregate_id`, and metadata
+//! - **External IDs**: Aggregates treat IDs as infrastructure metadata supplied
+//!   by the repository
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use sourcery::{
     Aggregate, Apply, ApplyProjection, DomainEvent, Handle, Projection, Repository,
     store::{JsonCodec, inmemory},
 };
-use std::collections::HashMap;
 
 // =============================================================================
 // Product Aggregate - PURE EVENTS (no IDs embedded)
@@ -118,9 +125,9 @@ impl Handle<AdjustInventory> for Product {
 
 /// Composite ID for Sale aggregate
 ///
-/// Encodes both the product SKU and sale number. The product SKU embedded in the ID
-/// allows projections to correlate sale events with product inventory without
-/// polluting the event data with cross-aggregate references.
+/// Encodes both the product SKU and sale number. The product SKU embedded in
+/// the ID allows projections to correlate sale events with product inventory
+/// without polluting the event data with cross-aggregate references.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaleId {
     pub product_sku: String,

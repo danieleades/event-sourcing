@@ -3,12 +3,14 @@
 //! This module provides testing utilities for event-sourced systems:
 //!
 //! - [`TestFramework`]: BDD-style unit testing for aggregates in isolation
-//! - [`RepositoryTestExt`]: Extension trait for integration testing with real repositories
+//! - [`RepositoryTestExt`]: Extension trait for integration testing with real
+//!   repositories
 //!
 //! # Unit Testing with [`TestFramework`]
 //!
 //! The [`TestFramework`] is inspired by [cqrs-es](https://crates.io/crates/cqrs-es)
-//! for testing aggregate behavior in isolation, without requiring a real event store.
+//! for testing aggregate behavior in isolation, without requiring a real event
+//! store.
 //!
 //! ```ignore
 //! use sourcery::test::TestFramework;
@@ -38,7 +40,8 @@
 //!
 //! # Integration Testing with [`RepositoryTestExt`]
 //!
-//! For integration tests that need a real repository, use [`RepositoryTestExt`]:
+//! For integration tests that need a real repository, use
+//! [`RepositoryTestExt`]:
 //!
 //! ```ignore
 //! use sourcery::test::RepositoryTestExt;
@@ -55,17 +58,17 @@
 //! )?;
 //! ```
 
-use std::fmt;
-use std::future::Future;
-use std::marker::PhantomData;
+use std::{fmt, future::Future, marker::PhantomData};
 
 use thiserror::Error;
 
-use crate::aggregate::{Aggregate, Handle};
-use crate::codec::{Codec, SerializableEvent};
-use crate::concurrency::{ConcurrencyStrategy, Unchecked};
-use crate::repository::Repository;
-use crate::store::{AppendError, EventStore, PersistableEvent};
+use crate::{
+    aggregate::{Aggregate, Handle},
+    codec::{Codec, SerializableEvent},
+    concurrency::{ConcurrencyStrategy, Unchecked},
+    repository::Repository,
+    store::{AppendError, EventStore, PersistableEvent},
+};
 
 // =============================================================================
 // Repository Test Extension Trait
@@ -234,7 +237,8 @@ pub trait RepositoryTestExt: StoreAccess + Send {
     ///
     /// # Arguments
     ///
-    /// * `aggregate_kind` - The aggregate type identifier (e.g., `Aggregate::KIND`)
+    /// * `aggregate_kind` - The aggregate type identifier (e.g.,
+    ///   `Aggregate::KIND`)
     /// * `id` - The aggregate instance identifier
     /// * `event` - Raw persistable event with pre-serialized data
     ///
@@ -489,8 +493,9 @@ impl<A: Aggregate> TestResult<A> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde::{Deserialize, Serialize};
+
+    use super::*;
 
     // Test fixtures
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -515,10 +520,11 @@ mod tests {
     }
 
     impl Aggregate for Counter {
-        const KIND: &'static str = "counter";
-        type Event = CounterEvent;
         type Error = String;
+        type Event = CounterEvent;
         type Id = String;
+
+        const KIND: &'static str = "counter";
 
         fn apply(&mut self, event: &Self::Event) {
             match event {
@@ -725,10 +731,11 @@ mod repository_test_ext_tests {
     }
 
     impl Aggregate for Score {
-        const KIND: &'static str = "score";
-        type Event = ScoreEvent;
         type Error = String;
+        type Event = ScoreEvent;
         type Id = String;
+
+        const KIND: &'static str = "score";
 
         fn apply(&mut self, event: &Self::Event) {
             match event {

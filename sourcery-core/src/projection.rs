@@ -1,10 +1,10 @@
 //! Read-side primitives.
 //!
 //! Projections rebuild query models from streams of stored events. This module
-//! provides the projection trait, event application hooks via [`ApplyProjection`],
-//! and the [`ProjectionBuilder`] that wires everything together.
-use std::collections::HashMap;
-use std::marker::PhantomData;
+//! provides the projection trait, event application hooks via
+//! [`ApplyProjection`], and the [`ProjectionBuilder`] that wires everything
+//! together.
+use std::{collections::HashMap, marker::PhantomData};
 
 use thiserror::Error;
 
@@ -15,11 +15,13 @@ use crate::{
     store::{EventFilter, EventStore, StoredEvent},
 };
 
-/// Trait implemented by read models that can be constructed from an event stream.
+/// Trait implemented by read models that can be constructed from an event
+/// stream.
 ///
-/// Implementors specify the identifier and metadata types their [`ApplyProjection`] handlers expect.
-/// Projections are typically rebuilt by calling [`Repository::build_projection`] and
-/// configuring the desired event streams before invoking [`ProjectionBuilder::load`].
+/// Implementors specify the identifier and metadata types their
+/// [`ApplyProjection`] handlers expect. Projections are typically rebuilt by
+/// calling [`Repository::build_projection`] and configuring the desired event
+/// streams before invoking [`ProjectionBuilder::load`].
 // ANCHOR: projection_trait
 pub trait Projection: Default + Sized {
     /// Aggregate identifier type this projection is compatible with.
@@ -126,9 +128,10 @@ where
     ///
     /// # Type Constraints
     ///
-    /// The store's metadata type must be convertible to the projection's metadata type.
-    /// `Clone` is required because event handlers receive metadata by reference, but
-    /// `Into::into()` requires ownership. The metadata is cloned once per event.
+    /// The store's metadata type must be convertible to the projection's
+    /// metadata type. `Clone` is required because event handlers receive
+    /// metadata by reference, but `Into::into()` requires ownership. The
+    /// metadata is cloned once per event.
     ///
     /// # Example
     /// ```ignore
@@ -154,11 +157,13 @@ where
         self
     }
 
-    /// Register all event kinds supported by a `ProjectionEvent` sum type across all aggregates.
+    /// Register all event kinds supported by a `ProjectionEvent` sum type
+    /// across all aggregates.
     ///
-    /// This is primarily intended for subscribing to an aggregate's generated event enum
-    /// (`A::Event` from `#[derive(Aggregate)]`) as a single "unit", rather than registering each
-    /// `DomainEvent` type individually.
+    /// This is primarily intended for subscribing to an aggregate's generated
+    /// event enum (`A::Event` from `#[derive(Aggregate)]`) as a single
+    /// "unit", rather than registering each `DomainEvent` type
+    /// individually.
     ///
     /// # Example
     /// ```ignore
@@ -187,10 +192,12 @@ where
         self
     }
 
-    /// Register a specific event type to load from a specific aggregate instance.
+    /// Register a specific event type to load from a specific aggregate
+    /// instance.
     ///
-    /// Use this when you only care about a single event kind. If you want to subscribe to an
-    /// aggregate's full event enum (`A::Event`), prefer [`ProjectionBuilder::events_for`].
+    /// Use this when you only care about a single event kind. If you want to
+    /// subscribe to an aggregate's full event enum (`A::Event`), prefer
+    /// [`ProjectionBuilder::events_for`].
     ///
     /// # Example
     /// ```ignore
@@ -223,8 +230,9 @@ where
 
     /// Register all event kinds for a specific aggregate instance.
     ///
-    /// This subscribes the projection to the aggregate's event sum type (`A::Event`) and loads
-    /// all events in that stream that correspond to `A::Event::EVENT_KINDS`.
+    /// This subscribes the projection to the aggregate's event sum type
+    /// (`A::Event`) and loads all events in that stream that correspond to
+    /// `A::Event::EVENT_KINDS`.
     ///
     /// # Example
     /// ```ignore
@@ -317,8 +325,9 @@ where
                     },
                 )?;
             }
-            // Unknown kinds are intentionally skipped - projections only care about
-            // the events they explicitly registered handlers for
+            // Unknown kinds are intentionally skipped - projections only care
+            // about the events they explicitly registered handlers
+            // for
         }
 
         tracing::info!(events_applied = event_count, "projection loaded");
@@ -328,9 +337,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::{error::Error, io};
+
     use super::*;
-    use std::error::Error;
-    use std::io;
 
     #[test]
     fn projection_error_display_store_mentions_loading() {

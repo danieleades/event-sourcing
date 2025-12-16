@@ -3,9 +3,9 @@
 //! `Repository` coordinates loading aggregates, invoking command handlers, and
 //! appending resulting events to the store.
 //!
-//! Snapshot support is opt-in via `Repository<_, _, Snapshots<_>>`. This keeps the default
-//! repository lightweight: no snapshot load/serialize work and no serde bounds on aggregate
-//! state unless snapshots are enabled.
+//! Snapshot support is opt-in via `Repository<_, _, Snapshots<_>>`. This keeps
+//! the default repository lightweight: no snapshot load/serialize work and no
+//! serde bounds on aggregate state unless snapshots are enabled.
 
 use std::marker::PhantomData;
 
@@ -81,7 +81,8 @@ where
     Store(#[source] StoreError),
 }
 
-/// Error type for snapshot-enabled optimistic command execution (includes concurrency).
+/// Error type for snapshot-enabled optimistic command execution (includes
+/// concurrency).
 #[derive(Debug, Error)]
 pub enum OptimisticSnapshotCommandError<
     AggregateError,
@@ -317,8 +318,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ProjectionError`] if the store fails to load events or if an event cannot be
-    /// decoded into the aggregate's event sum type.
+    /// Returns [`ProjectionError`] if the store fails to load events or if an
+    /// event cannot be decoded into the aggregate's event sum type.
     pub async fn load<A>(&self, id: &S::Id) -> Result<A, LoadError<S>>
     where
         A: Aggregate<Id = S::Id>,
@@ -360,12 +361,14 @@ impl<S> Repository<S, Unchecked>
 where
     S: EventStore,
 {
-    /// Execute a command with last-writer-wins semantics (no concurrency checking).
+    /// Execute a command with last-writer-wins semantics (no concurrency
+    /// checking).
     ///
     /// # Errors
     ///
-    /// Returns [`CommandError`] when the aggregate rejects the command, events cannot be encoded,
-    /// the store fails to persist, or the aggregate cannot be rebuilt.
+    /// Returns [`CommandError`] when the aggregate rejects the command, events
+    /// cannot be encoded, the store fails to persist, or the aggregate
+    /// cannot be rebuilt.
     pub async fn execute_command<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -410,9 +413,10 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`OptimisticCommandError::Concurrency`] if the stream version changed between
-    /// loading and committing. Other variants cover aggregate validation, encoding, persistence,
-    /// and projection rebuild errors.
+    /// Returns [`OptimisticCommandError::Concurrency`] if the stream version
+    /// changed between loading and committing. Other variants cover
+    /// aggregate validation, encoding, persistence, and projection rebuild
+    /// errors.
     pub async fn execute_command<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -461,7 +465,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns the last error if all retries are exhausted, or a non-concurrency error immediately.
+    /// Returns the last error if all retries are exhausted, or a
+    /// non-concurrency error immediately.
     pub async fn execute_with_retry<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -511,9 +516,9 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ProjectionError`] if the store fails to load events, if an event cannot be
-    /// decoded, or if a stored snapshot cannot be deserialized (which indicates snapshot
-    /// corruption).
+    /// Returns [`ProjectionError`] if the store fails to load events, if an
+    /// event cannot be decoded, or if a stored snapshot cannot be
+    /// deserialized (which indicates snapshot corruption).
     pub async fn load<A>(&self, id: &S::Id) -> Result<A, LoadError<S>>
     where
         A: Aggregate<Id = S::Id> + Serialize + DeserializeOwned,
@@ -581,18 +586,20 @@ where
     S: EventStore,
     SS: SnapshotStore<Id = S::Id, Position = S::Position>,
 {
-    /// Execute a command with last-writer-wins semantics and optional snapshotting.
+    /// Execute a command with last-writer-wins semantics and optional
+    /// snapshotting.
     ///
     /// # Errors
     ///
-    /// Returns [`SnapshotCommandError`] when the aggregate rejects the command, events cannot be
-    /// encoded, the store fails to persist, snapshot persistence fails, or the aggregate cannot be
-    /// rebuilt.
+    /// Returns [`SnapshotCommandError`] when the aggregate rejects the command,
+    /// events cannot be encoded, the store fails to persist, snapshot
+    /// persistence fails, or the aggregate cannot be rebuilt.
     ///
     /// # Panics
     ///
-    /// Panics if the store reports `None` from `stream_version` after a successful append. This
-    /// indicates a bug in the event store implementation.
+    /// Panics if the store reports `None` from `stream_version` after a
+    /// successful append. This indicates a bug in the event store
+    /// implementation.
     pub async fn execute_command<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -668,18 +675,21 @@ where
     S: EventStore,
     SS: SnapshotStore<Id = S::Id, Position = S::Position>,
 {
-    /// Execute a command using optimistic concurrency control and optional snapshotting.
+    /// Execute a command using optimistic concurrency control and optional
+    /// snapshotting.
     ///
     /// # Errors
     ///
-    /// Returns [`OptimisticSnapshotCommandError::Concurrency`] if the stream version changed
-    /// between loading and committing. Other variants cover aggregate validation, encoding,
-    /// persistence, snapshot persistence, and projection rebuild errors.
+    /// Returns [`OptimisticSnapshotCommandError::Concurrency`] if the stream
+    /// version changed between loading and committing. Other variants cover
+    /// aggregate validation, encoding, persistence, snapshot persistence,
+    /// and projection rebuild errors.
     ///
     /// # Panics
     ///
-    /// Panics if the store reports `None` from `stream_version` after a successful append. This
-    /// indicates a bug in the event store implementation.
+    /// Panics if the store reports `None` from `stream_version` after a
+    /// successful append. This indicates a bug in the event store
+    /// implementation.
     pub async fn execute_command<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -765,7 +775,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns the last error if all retries are exhausted, or a non-concurrency error immediately.
+    /// Returns the last error if all retries are exhausted, or a
+    /// non-concurrency error immediately.
     pub async fn execute_with_retry<A, Cmd>(
         &mut self,
         id: &S::Id,
@@ -795,9 +806,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::{error::Error, io};
+
     use super::*;
-    use std::error::Error;
-    use std::io;
 
     #[test]
     fn command_error_display_mentions_aggregate() {

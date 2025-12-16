@@ -4,10 +4,12 @@
 #[cfg(feature = "test-util")]
 mod with_test_util {
     use serde::{Deserialize, Serialize};
-    use sourcery::codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent};
-    use sourcery::store::PersistableEvent;
-    use sourcery::test::TestFramework;
-    use sourcery::{Aggregate, DomainEvent, Handle};
+    use sourcery::{
+        Aggregate, DomainEvent, Handle,
+        codec::{Codec, EventDecodeError, ProjectionEvent, SerializableEvent},
+        store::PersistableEvent,
+        test::TestFramework,
+    };
 
     // ============================================================================
     // Test Domain: Bank Account
@@ -112,10 +114,11 @@ mod with_test_util {
     // Hand-written aggregates only need to implement Aggregate::apply directly.
     // The Apply<E> trait is only required when using #[derive(Aggregate)].
     impl Aggregate for BankAccount {
-        const KIND: &'static str = "bank-account";
-        type Event = BankAccountEvent;
         type Error = String;
+        type Event = BankAccountEvent;
         type Id = String;
+
+        const KIND: &'static str = "bank-account";
 
         fn apply(&mut self, event: &Self::Event) {
             match event {
@@ -321,7 +324,7 @@ mod with_test_util {
 #[test]
 fn test_util_feature_is_required() {
     panic!(
-        "Integration tests require the `test-util` feature. \
-         Run `cargo test --features test-util` to execute them."
+        "Integration tests require the `test-util` feature. Run `cargo test --features test-util` \
+         to execute them."
     );
 }

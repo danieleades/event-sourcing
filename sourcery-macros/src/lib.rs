@@ -62,8 +62,9 @@ struct AggregateArgs {
 /// - `From<E>` implementations for each event type
 /// - `Aggregate` trait implementation that dispatches to `Apply<E>` for events
 ///
-/// **Note:** Commands are handled via individual `Handle<C>` trait implementations.
-/// No command enum is generated - use `execute_command::<Aggregate, Command>()` directly.
+/// **Note:** Commands are handled via individual `Handle<C>` trait
+/// implementations. No command enum is generated - use
+/// `execute_command::<Aggregate, Command>()` directly.
 ///
 /// # Attributes
 ///
@@ -73,8 +74,10 @@ struct AggregateArgs {
 /// - `events(Type1, Type2, ...)` - Event types
 ///
 /// ## Optional
-/// - `kind = "name"` - Aggregate type identifier (default: lowercase struct name)
-/// - `event_enum = "Name"` - Override generated event enum name (default: `{Struct}Event`)
+/// - `kind = "name"` - Aggregate type identifier (default: lowercase struct
+///   name)
+/// - `event_enum = "Name"` - Override generated event enum name (default:
+///   `{Struct}Event`)
 ///
 /// # Example
 ///
@@ -198,8 +201,9 @@ fn generate_aggregate_impl(args: AggregateArgs, input: &DeriveInput) -> TokenStr
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn to_kebab_case_converts_pascal_and_camel() {

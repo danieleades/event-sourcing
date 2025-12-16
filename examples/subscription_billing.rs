@@ -1,23 +1,27 @@
-//! Subscription Billing Example – Command/Query split with cross-aggregate projection
+//! Subscription Billing Example – Command/Query split with cross-aggregate
+//! projection
 //!
-//! This example demonstrates a realistic CQRS flow using the primitives provided by the
-//! `sourcery` crate:
-//! - **Subscription aggregate** drives the customer lifecycle (activation/cancellation).
-//! - **Invoice aggregate** handles billing and payments for a specific customer invoice.
-//! - **`CustomerBillingProjection`** consumes events from *both* aggregates to maintain
-//!   an operational dashboard: plan status, outstanding balance, audit metadata.
+//! This example demonstrates a realistic CQRS flow using the primitives
+//! provided by the `sourcery` crate:
+//! - **Subscription aggregate** drives the customer lifecycle
+//!   (activation/cancellation).
+//! - **Invoice aggregate** handles billing and payments for a specific customer
+//!   invoice.
+//! - **`CustomerBillingProjection`** consumes events from *both* aggregates to
+//!   maintain an operational dashboard: plan status, outstanding balance, audit
+//!   metadata.
 //!
 //! The example emphasises CQRS good practice:
 //! - Aggregates emit domain-focused events with no persistence artefacts.
-//! - Commands include tracing metadata (`causation_id`, `correlation_id`, `user_id`),
-//!   making downstream projections observable.
-//! - The query-side projection is idempotent and could be materialised asynchronously.
-//!   (For the demo we rebuild it in-process; in production it would run in its own worker.)
+//! - Commands include tracing metadata (`causation_id`, `correlation_id`,
+//!   `user_id`), making downstream projections observable.
+//! - The query-side projection is idempotent and could be materialised
+//!   asynchronously. (For the demo we rebuild it in-process; in production it
+//!   would run in its own worker.)
 //! - The command side consults the read model before allowing a risky operation
 //!   (cancelling a subscription while money is outstanding).
 
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use serde::{Deserialize, Serialize};
 use sourcery::{
