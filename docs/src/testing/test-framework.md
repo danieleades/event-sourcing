@@ -21,20 +21,16 @@ event-sourcing = { version = "0.1", features = ["test-util"] }
 ## Basic Usage
 
 ```rust,ignore
-use event_sourcing::TestFramework;
+use event_sourcing::test::TestFramework;
 
 type AccountTest = TestFramework<Account>;
 
 #[test]
 fn deposit_increases_balance() {
     AccountTest::new()
-        .given(vec![
-            FundsDeposited { amount: 100 }.into(),
-        ])
+        .given(vec![FundsDeposited { amount: 100 }.into()])
         .when(&Deposit { amount: 50 })
-        .then_expect_events(&[
-            FundsDeposited { amount: 50 }.into(),
-        ]);
+        .then_expect_events(&[FundsDeposited { amount: 50 }.into()]);
 }
 ```
 
@@ -152,70 +148,32 @@ Custom assertions on the result:
 ## Complete Test Suite Example
 
 ```rust,ignore
-use event_sourcing::TestFramework;
+use event_sourcing::test::TestFramework;
 
 type AccountTest = TestFramework<Account>;
 
-mod deposit_tests {
-    use super::*;
-
-    #[test]
-    fn deposits_positive_amount() {
-        AccountTest::new()
-            .given_no_previous_events()
-            .when(&Deposit { amount: 100 })
-            .then_expect_events(&[
-                FundsDeposited { amount: 100 }.into(),
-            ]);
-    }
-
-    #[test]
-    fn rejects_zero_deposit() {
-        AccountTest::new()
-            .given_no_previous_events()
-            .when(&Deposit { amount: 0 })
-            .then_expect_error_message("positive");
-    }
-
-    #[test]
-    fn rejects_negative_deposit() {
-        AccountTest::new()
-            .given_no_previous_events()
-            .when(&Deposit { amount: -50 })
-            .then_expect_error();
-    }
+#[test]
+fn deposits_positive_amount() {
+    AccountTest::new()
+        .given_no_previous_events()
+        .when(&Deposit { amount: 100 })
+        .then_expect_events(&[FundsDeposited { amount: 100 }.into()]);
 }
 
-mod withdraw_tests {
-    use super::*;
+#[test]
+fn rejects_overdraft() {
+    AccountTest::new()
+        .given(vec![FundsDeposited { amount: 100 }.into()])
+        .when(&Withdraw { amount: 150 })
+        .then_expect_error_eq(&AccountError::InsufficientFunds);
+}
 
-    #[test]
-    fn withdraws_available_funds() {
-        AccountTest::new()
-            .given(vec![FundsDeposited { amount: 100 }.into()])
-            .when(&Withdraw { amount: 50 })
-            .then_expect_events(&[
-                FundsWithdrawn { amount: 50 }.into(),
-            ]);
-    }
-
-    #[test]
-    fn rejects_overdraft() {
-        AccountTest::new()
-            .given(vec![FundsDeposited { amount: 100 }.into()])
-            .when(&Withdraw { amount: 150 })
-            .then_expect_error_eq(&AccountError::InsufficientFunds);
-    }
-
-    #[test]
-    fn allows_full_withdrawal() {
-        AccountTest::new()
-            .given(vec![FundsDeposited { amount: 100 }.into()])
-            .when(&Withdraw { amount: 100 })
-            .then_expect_events(&[
-                FundsWithdrawn { amount: 100 }.into(),
-            ]);
-    }
+#[test]
+fn rejects_invalid_deposit() {
+    AccountTest::new()
+        .given_no_previous_events()
+        .when(&Deposit { amount: -50 })
+        .then_expect_error();
 }
 ```
 

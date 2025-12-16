@@ -16,7 +16,7 @@ Build a simple bank account aggregate in under 50 lines. This example demonstrat
 4. **Implemented `Apply`** — How events mutate state
 5. **Implemented `Handle`** — How commands produce events
 6. **Created a projection** — `TotalDeposits` builds a read model
-7. **Wired the repository** — Connected everything with `InMemoryEventStore`
+7. **Wired the repository** — Connected everything with `inmemory::Store`
 
 ## Key Points
 

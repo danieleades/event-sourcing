@@ -46,6 +46,7 @@ CREATE INDEX idx_events_kind
 ## Implementation Skeleton
 
 ```rust,ignore
+use std::future::Future;
 use event_sourcing::store::{
     AppendError, EventFilter, EventStore, JsonCodec, PersistableEvent, StoredEvent, Transaction,
 };
@@ -201,7 +202,7 @@ s3://bucket/events-by-kind/{event_kind}/{position}.json  (symlinks/copies)
 
 ## Testing Your Store
 
-Use the same test patterns as `InMemoryEventStore`:
+Use the same test patterns as `inmemory::Store`:
 
 ```rust,ignore
 #[tokio::test]
