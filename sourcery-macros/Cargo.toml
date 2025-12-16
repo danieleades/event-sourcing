@@ -1,5 +1,6 @@
 [package]
 name = "sourcery-macros"
+description = "Derive macros for the Sourcery library"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
