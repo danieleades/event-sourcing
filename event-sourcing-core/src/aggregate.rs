@@ -12,8 +12,8 @@ use crate::{
     codec::{Codec, ProjectionEvent},
     concurrency::ConcurrencyStrategy,
     projection::ProjectionError,
-    repository::{Repository, SnapshotRepository},
-    snapshot::SnapshotStore,
+    repository::{Repository, Snapshots},
+    snapshot::{NoSnapshots, SnapshotStore},
     store::EventStore,
 };
 
@@ -25,8 +25,8 @@ use crate::{
 ///
 /// Aggregates are domain objects and do not require serialization by default.
 ///
-/// If you enable snapshots (via `SnapshotRepository`), the aggregate state must be
-/// serializable; see [`SnapshotableAggregate`].
+/// If you enable snapshots (via `Repository::with_snapshots`), the aggregate state must be
+/// serializable (`Serialize + DeserializeOwned`).
 pub trait Aggregate: Default + Sized {
     /// Aggregate type identifier used by the event store.
     ///
@@ -46,14 +46,6 @@ pub trait Aggregate: Default + Sized {
     /// For hand-written aggregates, implement this directly with a match expression.
     fn apply(&mut self, event: &Self::Event);
 }
-
-/// Marker trait for aggregates that can be snapshotted.
-///
-/// Snapshot-enabled repositories require aggregates to be serializable so they can
-/// persist point-in-time state.
-pub trait SnapshotableAggregate: Aggregate + Serialize + DeserializeOwned {}
-
-impl<T> SnapshotableAggregate for T where T: Aggregate + Serialize + DeserializeOwned {}
 
 /// Mutate an aggregate with a domain event.
 ///
@@ -118,7 +110,7 @@ impl<'a, R, A> AggregateBuilder<'a, R, A> {
     }
 }
 
-impl<S, C, A> AggregateBuilder<'_, Repository<S, C>, A>
+impl<S, C, A> AggregateBuilder<'_, Repository<S, C, NoSnapshots<S::Id, S::Position>>, A>
 where
     S: EventStore,
     C: ConcurrencyStrategy,
@@ -143,12 +135,12 @@ where
     }
 }
 
-impl<S, SS, C, A> AggregateBuilder<'_, SnapshotRepository<S, SS, C>, A>
+impl<S, SS, C, A> AggregateBuilder<'_, Repository<S, C, Snapshots<SS>>, A>
 where
     S: EventStore,
     SS: SnapshotStore<Id = S::Id, Position = S::Position>,
     C: ConcurrencyStrategy,
-    A: SnapshotableAggregate<Id = S::Id>,
+    A: Aggregate<Id = S::Id> + Serialize + DeserializeOwned,
 {
     /// Load the aggregate instance using snapshots when available.
     ///

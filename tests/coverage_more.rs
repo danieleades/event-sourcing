@@ -8,7 +8,9 @@ use event_sourcing::codec::{Codec, EventDecodeError, ProjectionEvent, Serializab
 use event_sourcing::concurrency::ConcurrencyConflict;
 use event_sourcing::projection::ProjectionError;
 use event_sourcing::repository::{OptimisticCommandError, SnapshotCommandError};
-use event_sourcing::snapshot::{InMemorySnapshotStore, Snapshot, SnapshotStore};
+use event_sourcing::snapshot::{
+    InMemorySnapshotStore, OfferSnapshotError, Snapshot, SnapshotOffer, SnapshotStore,
+};
 use event_sourcing::store::{EventStore, InMemoryEventStore, JsonCodec, PersistableEvent};
 use event_sourcing::test::RepositoryTestExt;
 use event_sourcing::{Aggregate, ApplyProjection, DomainEvent, Handle, Projection, Repository};
@@ -165,20 +167,21 @@ async fn in_memory_snapshot_store_policy_always_saves() {
     let mut snapshots = InMemorySnapshotStore::<String, u64>::always();
     let id = "c1".to_string();
 
-    assert!(snapshots.should_snapshot(Counter::KIND, &id, 0));
-
-    snapshots
+    let result = snapshots
         .offer_snapshot(
             Counter::KIND,
             &id,
-            Snapshot {
-                position: 1,
-                data: vec![1, 2, 3],
-            },
             0,
+            || -> Result<Snapshot<u64>, Infallible> {
+                Ok(Snapshot {
+                    position: 1,
+                    data: vec![1, 2, 3],
+                })
+            },
         )
         .await
         .unwrap();
+    assert_eq!(result, SnapshotOffer::Stored);
 
     let loaded = snapshots.load(Counter::KIND, &id).await.unwrap();
     assert!(loaded.is_some());
@@ -189,31 +192,56 @@ async fn in_memory_snapshot_store_policy_every_n_events_saves_at_threshold() {
     let mut snapshots = InMemorySnapshotStore::<String, u64>::every(3);
     let id = "c1".to_string();
 
-    assert!(!snapshots.should_snapshot(Counter::KIND, &id, 2));
-    assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_none());
-
-    assert!(snapshots.should_snapshot(Counter::KIND, &id, 3));
-    snapshots
+    let result = snapshots
         .offer_snapshot(
             Counter::KIND,
             &id,
-            Snapshot {
-                position: 2,
-                data: vec![2],
+            2,
+            || -> Result<Snapshot<u64>, Infallible> {
+                panic!("snapshot should be declined before threshold");
             },
-            3,
         )
         .await
         .unwrap();
+    assert_eq!(result, SnapshotOffer::Declined);
+
+    assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_none());
+
+    let result = snapshots
+        .offer_snapshot(
+            Counter::KIND,
+            &id,
+            3,
+            || -> Result<Snapshot<u64>, Infallible> {
+                Ok(Snapshot {
+                    position: 2,
+                    data: vec![2],
+                })
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, SnapshotOffer::Stored);
     assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_some());
 }
 
 #[tokio::test]
 async fn in_memory_snapshot_store_policy_never_does_not_save() {
-    let snapshots = InMemorySnapshotStore::<String, u64>::never();
+    let mut snapshots = InMemorySnapshotStore::<String, u64>::never();
     let id = "c1".to_string();
 
-    assert!(!snapshots.should_snapshot(Counter::KIND, &id, 100));
+    let result = snapshots
+        .offer_snapshot(
+            Counter::KIND,
+            &id,
+            100,
+            || -> Result<Snapshot<u64>, Infallible> {
+                panic!("snapshot should be declined when policy is never");
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, SnapshotOffer::Declined);
 
     assert!(snapshots.load(Counter::KIND, &id).await.unwrap().is_none());
 }
@@ -333,28 +361,31 @@ impl SnapshotStore for FailingLoadSnapshotStore {
     type Position = u64;
     type Error = SnapshotLoadError;
 
-    fn load(
-        &self,
-        _: &str,
-        _: &Self::Id,
+    fn load<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a Self::Id,
     ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
     + Send
-    + '_ {
+    + 'a {
         std::future::ready(Err(SnapshotLoadError))
     }
 
-    fn offer_snapshot(
-        &mut self,
-        _: &str,
-        _: &Self::Id,
-        _: Snapshot<Self::Position>,
+    fn offer_snapshot<'a, CE, Create>(
+        &'a mut self,
+        _: &'a str,
+        _: &'a Self::Id,
         _: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + '_ {
-        std::future::ready(Ok(()))
-    }
-
-    fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
-        false
+        _: Create,
+    ) -> impl std::future::Future<
+        Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>,
+    > + Send
+    + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a,
+    {
+        std::future::ready(Ok(SnapshotOffer::Declined))
     }
 }
 
@@ -383,31 +414,34 @@ impl SnapshotStore for CorruptSnapshotStore {
     type Position = u64;
     type Error = SnapshotLoadError;
 
-    fn load(
-        &self,
-        _: &str,
-        _: &Self::Id,
+    fn load<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a Self::Id,
     ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
     + Send
-    + '_ {
+    + 'a {
         std::future::ready(Ok(Some(Snapshot {
             position: 0,
             data: b"not-json".to_vec(),
         })))
     }
 
-    fn offer_snapshot(
-        &mut self,
-        _: &str,
-        _: &Self::Id,
-        _: Snapshot<Self::Position>,
+    fn offer_snapshot<'a, CE, Create>(
+        &'a mut self,
+        _: &'a str,
+        _: &'a Self::Id,
         _: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + '_ {
-        std::future::ready(Ok(()))
-    }
-
-    fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
-        false
+        _: Create,
+    ) -> impl std::future::Future<
+        Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>,
+    > + Send
+    + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a,
+    {
+        std::future::ready(Ok(SnapshotOffer::Declined))
     }
 }
 
@@ -474,29 +508,32 @@ impl SnapshotStore for TrackingSnapshotStore {
     type Position = u64;
     type Error = Infallible;
 
-    fn load(
-        &self,
-        _: &str,
-        _: &Self::Id,
+    fn load<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a Self::Id,
     ) -> impl std::future::Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>>
     + Send
-    + '_ {
+    + 'a {
         self.load_called.store(true, Ordering::Relaxed);
         std::future::ready(Ok(None))
     }
 
-    fn offer_snapshot(
-        &mut self,
-        _: &str,
-        _: &Self::Id,
-        _: Snapshot<Self::Position>,
+    fn offer_snapshot<'a, CE, Create>(
+        &'a mut self,
+        _: &'a str,
+        _: &'a Self::Id,
         _: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + '_ {
-        std::future::ready(Ok(()))
-    }
-
-    fn should_snapshot(&self, _: &str, _: &Self::Id, _: u64) -> bool {
-        false
+        _: Create,
+    ) -> impl std::future::Future<
+        Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>,
+    > + Send
+    + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a,
+    {
+        std::future::ready(Ok(SnapshotOffer::Declined))
     }
 }
 

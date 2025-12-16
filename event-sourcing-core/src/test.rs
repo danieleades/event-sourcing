@@ -64,7 +64,7 @@ use thiserror::Error;
 use crate::aggregate::{Aggregate, Handle};
 use crate::codec::{Codec, SerializableEvent};
 use crate::concurrency::{ConcurrencyStrategy, Unchecked};
-use crate::repository::{Repository, SnapshotRepository};
+use crate::repository::Repository;
 use crate::store::{AppendError, EventStore, PersistableEvent};
 
 // =============================================================================
@@ -121,26 +121,9 @@ pub trait StoreAccess {
     fn store_mut(&mut self) -> &mut Self::Store;
 }
 
-impl<S, C> StoreAccess for Repository<S, C>
+impl<S, C, M> StoreAccess for Repository<S, C, M>
 where
     S: EventStore,
-    C: ConcurrencyStrategy,
-{
-    type Store = S;
-
-    fn store(&self) -> &Self::Store {
-        &self.store
-    }
-
-    fn store_mut(&mut self) -> &mut Self::Store {
-        &mut self.store
-    }
-}
-
-impl<S, SS, C> StoreAccess for SnapshotRepository<S, SS, C>
-where
-    S: EventStore,
-    SS: crate::snapshot::SnapshotStore<Id = S::Id, Position = S::Position>,
     C: ConcurrencyStrategy,
 {
     type Store = S;

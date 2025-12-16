@@ -86,26 +86,22 @@ pub trait SnapshotStore {
     type Position;
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn load(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-    ) -> Result<Option<Snapshot<Self::Position>>, Self::Error>;
+    fn load<'a>(
+        &'a self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
+    ) -> impl Future<Output = Result<Option<Snapshot<Self::Position>>, Self::Error>> + Send + 'a;
 
-    fn should_snapshot(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
+    fn offer_snapshot<'a, CE, Create>(
+        &'a mut self,
+        aggregate_kind: &'a str,
+        aggregate_id: &'a Self::Id,
         events_since_last_snapshot: u64,
-    ) -> bool;
-
-    fn offer_snapshot(
-        &mut self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-        snapshot: Snapshot<Self::Position>,
-        events_since_last_snapshot: u64,
-    ) -> Result<(), Self::Error>;
+        create_snapshot: Create,
+    ) -> impl Future<Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>> + Send + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a;
 }
 ```
 

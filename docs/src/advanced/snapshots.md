@@ -88,25 +88,23 @@ pub trait SnapshotStore: Send + Sync {
            + Send
            + 'a;
 
-    fn should_snapshot(
-        &self,
-        aggregate_kind: &str,
-        aggregate_id: &Self::Id,
-        events_since_last_snapshot: u64,
-    ) -> bool;
-
-    fn offer_snapshot<'a>(
+    fn offer_snapshot<'a, CE, Create>(
         &'a mut self,
         aggregate_kind: &'a str,
         aggregate_id: &'a Self::Id,
-        snapshot: Snapshot<Self::Position>,
         events_since_last_snapshot: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'a;
+        create_snapshot: Create,
+    ) -> impl std::future::Future<
+        Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>,
+    > + Send + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<Self::Position>, CE> + 'a;
 }
 ```
 
-The repository calls `should_snapshot` before serializing aggregate state, so snapshot stores can
-avoid unnecessary snapshot encoding work when a policy declines.
+The repository calls `offer_snapshot` after successfully appending new events. Implementations may
+decline without invoking `create_snapshot`, avoiding unnecessary snapshot encoding work.
 
 ## The `Snapshot` Type
 
@@ -151,20 +149,30 @@ impl SnapshotStore for PostgresSnapshotStore {
         async move { todo!() }
     }
 
-    fn should_snapshot(&self, _kind: &str, _id: &String, events_since: u64) -> bool {
-        events_since >= 100
-    }
-
-    fn offer_snapshot<'a>(
+    fn offer_snapshot<'a, CE, Create>(
         &'a mut self,
         kind: &'a str,
         id: &'a String,
-        snapshot: Snapshot<u64>,
         events_since: u64,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'a {
-        debug_assert!(self.should_snapshot(kind, id, events_since));
+        create_snapshot: Create,
+    ) -> impl std::future::Future<
+        Output = Result<SnapshotOffer, OfferSnapshotError<Self::Error, CE>>,
+    > + Send + 'a
+    where
+        CE: std::error::Error + Send + Sync + 'static,
+        Create: FnOnce() -> Result<Snapshot<u64>, CE> + 'a,
+    {
+        if events_since < 100 {
+            return std::future::ready(Ok(SnapshotOffer::Declined));
+        }
+
+        let snapshot = match create_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(e) => return std::future::ready(Err(OfferSnapshotError::Create(e))),
+        };
+
         // INSERT INTO snapshots (kind, id, position, data) VALUES (...)
-        async move { Ok(()) }
+        async move { Ok(SnapshotOffer::Stored) }
     }
 }
 ```
