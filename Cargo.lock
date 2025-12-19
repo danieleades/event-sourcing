@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "sourcery"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde-evolve",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "sourcery-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "sourcery-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -1197,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "sourcery-postgres"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "sourcery-core",
