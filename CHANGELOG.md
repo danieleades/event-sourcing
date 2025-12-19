@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/danieleades/sourcery/compare/sourcery-v0.1.0...sourcery-v0.1.1) - 2025-12-19
+
+### Other
+
+- update crate README and metadata ([#20](https://github.com/danieleades/sourcery/pull/20))
+- *(deps)* bump actions/checkout from 4 to 6
+
 ## [0.1.0](https://github.com/danieleades/sourcery/releases/tag/sourcery-v0.1.0) - 2025-12-16
 
 ### Added
